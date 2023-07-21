@@ -1,0 +1,10 @@
+
+[workspace]
+
+members = [
+    "pb",
+    "ta",
+    "gs",
+    "uav",
+]
+

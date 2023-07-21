@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package register_ta_uav;
+
+/// Register messages
+
+// From TA to UAV
+// maybe this not needed, 
+// when the drone first connects to TA, it can send a TCP message instead of using protobuf.
+message UavRegisterPhase1Message {
+    bytes c = 1;
+}
+
+
+// From UAV to TA
+message UavRegisterPhase2Message {
+    bytes r = 1;
+}
+
+// From TA to UAV
+message UavRegisterPhase3Message {
+    bytes uid = 1;
+    bytes ruid = 2;
+}
+
+/// End of register messages
+
+
+// uav request message
+message UavRequest {
+    oneof request {
+        // it's including the UAV's response `r` from PUF
+        UavRegisterPhase2Message uav_register_phase2 = 1;
+        // it's including the UAV's uid and ruid
+        UavRegisterPhase3Message uav_register_phase3 = 2;
+    }
+}
+
+// ta returns information to the UAV
+// use the status to indicate the result 
+// if status == 0, it means success
+// if status == 1, it means fail
+message UavResponse {
+    int32 status = 1;
+}

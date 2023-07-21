@@ -1,0 +1,26 @@
+syntax = "proto3";
+package register_ta_gs;
+
+
+// From GS to TA
+// message GsRegisterMessage {
+//     bytes gid = 1;
+//     bytes rgid = 2;
+// }
+
+
+
+// gs request message
+message GsRequest {
+    // it's including the GS's GID and RGID
+    bytes gid = 1;
+    bytes rgid = 2;
+}
+
+// ta returns information to the gs
+// use the status to indicate the result 
+// if status == 0, it means success
+// if status == 1, it means fail
+message GsResponse {
+    int32 status = 1;
+}
