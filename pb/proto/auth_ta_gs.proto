@@ -16,8 +16,8 @@ message TaPublicParameterMessage {
 // Message for the first phase of the authentication protocol
 message GsAuthPhase1Message {
     bytes rgid = 1;
-    string t = 2;
-    bytes hash = 3;
+    int64 t = 2;
+    string hash = 3;
     bytes signature = 4;
     bytes puk_gs = 5;
 }

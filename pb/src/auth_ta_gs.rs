@@ -20,10 +20,10 @@ pub struct TaPublicParameterMessage {
 pub struct GsAuthPhase1Message {
     #[prost(bytes = "bytes", tag = "1")]
     pub rgid: ::prost::bytes::Bytes,
-    #[prost(string, tag = "2")]
-    pub t: ::prost::alloc::string::String,
-    #[prost(bytes = "bytes", tag = "3")]
-    pub hash: ::prost::bytes::Bytes,
+    #[prost(int64, tag = "2")]
+    pub t: i64,
+    #[prost(string, tag = "3")]
+    pub hash: ::prost::alloc::string::String,
     #[prost(bytes = "bytes", tag = "4")]
     pub signature: ::prost::bytes::Bytes,
     #[prost(bytes = "bytes", tag = "5")]

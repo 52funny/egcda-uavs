@@ -21,6 +21,9 @@ pb = { path = "../pb" }
 mcore = { path = "../../mcore", features = ["std"] }
 anyhow = "1.0.72"
 rand = "0.8.5"
+lazy_static = "1.4.0"
+sha256 = "1.2.2"
+chrono = "0.4.26"
 
 
 
