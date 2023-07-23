@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
     // 1 means gs
     stream.write_u8(1).await.unwrap();
 
-    let addr = stream.peer_addr()?.ip();
+    let _addr = stream.peer_addr()?.ip();
 
     // use custom frame
     let mut frame = Framed::new(stream, codec::gs_register_codec::GsRegisterCodec);
@@ -30,7 +30,9 @@ async fn main() -> anyhow::Result<()> {
     let rgid: Bytes = thread_rng().gen::<[u8; 32]>().to_vec().into();
 
     let req = pb::register_ta_gs::GsRequest { gid, rgid };
+
     frame.send(req).await?;
+    frame.get_mut().write_u8(1).await?;
 
     Ok(())
 }
