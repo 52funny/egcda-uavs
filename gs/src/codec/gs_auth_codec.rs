@@ -9,11 +9,11 @@ impl GsAuthCodec {
     const MAX_SIZE: usize = 1024 * 1024 * 1024 * 8;
 }
 
-impl codec::Encoder<GsAuthResponse> for GsAuthCodec {
+impl codec::Encoder<GsAuthRequest> for GsAuthCodec {
     type Error = std::io::Error;
     fn encode(
         &mut self,
-        item: GsAuthResponse,
+        item: GsAuthRequest,
         dst: &mut bytes::BytesMut,
     ) -> Result<(), Self::Error> {
         let data = item.encode_to_vec();
@@ -32,7 +32,7 @@ impl codec::Encoder<GsAuthResponse> for GsAuthCodec {
 }
 
 impl codec::Decoder for GsAuthCodec {
-    type Item = GsAuthRequest;
+    type Item = GsAuthResponse;
     type Error = std::io::Error;
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let buf_len = src.len();
@@ -53,7 +53,7 @@ impl codec::Decoder for GsAuthCodec {
         }
 
         let data = src.split_to(data_len);
-        let item = GsAuthRequest::decode(data)?;
+        let item = GsAuthResponse::decode(data)?;
         Ok(Some(item))
     }
 }
