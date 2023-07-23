@@ -21,3 +21,4 @@ mcore = { path = "../../mcore", features = ["std"] }
 anyhow = "1.0.72"
 lazy_static = "1.4.0"
 dashmap = "5.5.0"
+rand = "0.8.5"

@@ -1,6 +1,6 @@
 mod codec;
 use bytes::Bytes;
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 use rand::{thread_rng, Rng};
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tokio_util::codec::Framed;
@@ -32,7 +32,12 @@ async fn main() -> anyhow::Result<()> {
     let req = pb::register_ta_gs::GsRequest { gid, rgid };
 
     frame.send(req).await?;
-    frame.get_mut().write_u8(1).await?;
+    if let Some(Ok(res)) = frame.next().await {
+        tracing::info!(
+            "gs register status: {}",
+            if res.status == 1 { "failed" } else { "success" }
+        );
+    }
 
     Ok(())
 }
