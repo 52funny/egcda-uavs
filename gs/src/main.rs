@@ -1,6 +1,7 @@
 mod codec;
-use std::mem::MaybeUninit;
+use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit, Nonce};
 use bytes::Bytes;
+use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
 use mcore::bn254::big::BIG;
 use mcore::bn254::ecp::ECP;
@@ -8,6 +9,8 @@ use mcore::bn254::ecp2::ECP2;
 use mcore::bn254::pair;
 use pb::auth_ta_gs::gs_auth_response::Response;
 use rand::{thread_rng, Rng};
+use rug::Integer;
+use std::mem::MaybeUninit;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tokio_util::codec::Framed;
 use tracing_subscriber::EnvFilter;
@@ -20,8 +23,21 @@ pub struct GSConfig {
     pub sk_gs_bytes: Vec<u8>,
     pub puk_gs_bytes: Vec<u8>,
 }
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+pub struct UavInfo {
+    pub uid: Vec<u8>,
+    pub ruid: Vec<u8>,
+    pub c: Vec<u8>,
+    pub r: Vec<u8>,
+    pub n: Integer,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct UavList(DashMap<String, UavInfo>);
+
 lazy_static::lazy_static! {
     static ref GS_CONFIG: GSConfig = init_gs_keys();
+    static ref UAV_LIST: UavList = UavList(DashMap::new());
 }
 
 /// Init GS keys
@@ -50,7 +66,7 @@ fn init_gs_keys() -> GSConfig {
 async fn main() -> anyhow::Result<()> {
     // tracing logger
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("info".parse().unwrap()))
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("debug".parse().unwrap()))
         .init();
 
     let addr = "127.0.0.1:8090";
@@ -105,7 +121,7 @@ async fn auth(addr: &str) -> anyhow::Result<()> {
     // receive ta public parameter
     if let Some(Ok(res)) = frame.next().await {
         if let Some(Response::TaPublicParameter(paramter)) = res.response {
-            tracing::info!("get ta public key: {}", hex::encode(&paramter.puk_gs));
+            tracing::debug!("get ta public key: {}", hex::encode(&paramter.puk_gs));
             puk_ta_bytes.write(paramter.puk_gs.to_vec());
         } else {
             anyhow::bail!("get ta public parameter failed");
@@ -117,9 +133,10 @@ async fn auth(addr: &str) -> anyhow::Result<()> {
     let t = chrono::Utc::now().timestamp();
     let hash_str = sha256::digest(gid + &t.to_string());
     // 32 byte
-    let hash = hex::decode(&hash_str)?;
+    let hash_bytes = hex::decode(&hash_str)?;
+    let hash = BIG::frombytes(&hash_bytes);
     let puk_ta = ECP::frombytes(unsafe { puk_ta_bytes.assume_init_ref() });
-    let p = puk_ta.mul(&BIG::frombytes(&hash));
+    let p = puk_ta.mul(&hash);
     let q = ECP2::generator();
     let fp = pair::ate(&q, &p);
     let fp = pair::fexp(&fp);
@@ -128,7 +145,7 @@ async fn auth(addr: &str) -> anyhow::Result<()> {
 
     let mut sig = vec![0u8; 32 * 2 * 6];
     fp.tobytes(&mut sig);
-    tracing::info!("sig: {}", hex::encode(&sig));
+    tracing::debug!("sig: {}", hex::encode(&sig));
     frame
         .send(pb::auth_ta_gs::GsAuthRequest::new_gs_auth_phase1_message(
             GS_CONFIG.rgid.to_vec(),
@@ -140,19 +157,51 @@ async fn auth(addr: &str) -> anyhow::Result<()> {
         .await?;
 
     // receive auth phase 2
-    if let Some(Ok(res)) = frame.next().await {
+    let status = if let Some(Ok(res)) = frame.next().await {
         if let Some(Response::GsAuthPhase2(status)) = res.response {
-            tracing::info!(
-                "auth: {}",
-                if status.status == 0 {
-                    "success"
-                } else {
-                    "failed"
-                }
-            );
+            status.status
         } else {
-            anyhow::bail!("get auth phase 2 failed");
+            anyhow::bail!("get auth phase2 failed");
         }
+    } else {
+        anyhow::bail!("get gs auth response failed");
     };
+    tracing::info!("auth: {}", if status == 0 { "success" } else { "failed" });
+    // means auth success
+    if status == 0 {
+        // receive uav list
+        if let Some(Ok(res)) = frame.next().await {
+            if let Some(Response::UavList(uav_list)) = res.response {
+                let uav_list_enc = uav_list.uav_list_enc.to_vec();
+
+                // construct ssk_tags
+                let ssk_tags = puk_ta.mul(&GS_CONFIG.sk_gs).mul(&hash);
+                let mut ssk_tags_bytes = vec![0u8; 65];
+                ssk_tags.tobytes(&mut ssk_tags_bytes, false);
+                let ssk_tags_bytes_sha2 = hex::decode(sha256::digest(&ssk_tags_bytes))?;
+
+                tracing::info!("ssk_tags: {}", ssk_tags);
+
+                let key = Key::<Aes256Gcm>::from_slice(&ssk_tags_bytes_sha2);
+                let nonce = Nonce::from_slice(&ssk_tags_bytes_sha2[..12]);
+                let aes_gcm = aes_gcm::Aes256Gcm::new(key);
+                tracing::debug!("aes key: {}", hex::encode(key));
+                tracing::debug!("aes key: {}", hex::encode(nonce));
+
+                // decrypt
+                let uav_list = aes_gcm.decrypt(nonce, uav_list_enc.as_ref()).unwrap();
+
+                let uav_list: UavList = serde_json::from_slice(&uav_list)?;
+                uav_list.0.iter().for_each(|k| {
+                    UAV_LIST.0.insert(k.key().clone(), k.value().clone());
+                });
+                tracing::info!("uav list: {:?}", UAV_LIST.0)
+            } else {
+                anyhow::bail!("get uav list failed");
+            }
+        } else {
+            anyhow::bail!("get gs auth response failed");
+        }
+    }
     Ok(())
 }

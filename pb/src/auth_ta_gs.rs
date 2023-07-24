@@ -39,6 +39,16 @@ pub struct GsAuthPhase2Message {
     #[prost(int32, tag = "1")]
     pub status: i32,
 }
+/// When auth completed, the TA server will send the UAV list to the GS
+/// Use the AES-GCM to encrypt the UAV list
+#[derive(PartialOrd)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UavListMessage {
+    /// bytes uav_list_mac = 2;
+    #[prost(bytes = "bytes", tag = "1")]
+    pub uav_list_enc: ::prost::bytes::Bytes,
+}
 /// Request message
 #[derive(PartialOrd)]
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -64,7 +74,7 @@ pub mod gs_auth_request {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GsAuthResponse {
-    #[prost(oneof = "gs_auth_response::Response", tags = "1, 2")]
+    #[prost(oneof = "gs_auth_response::Response", tags = "1, 2, 3")]
     pub response: ::core::option::Option<gs_auth_response::Response>,
 }
 /// Nested message and enum types in `GsAuthResponse`.
@@ -77,5 +87,7 @@ pub mod gs_auth_response {
         TaPublicParameter(super::TaPublicParameterMessage),
         #[prost(message, tag = "2")]
         GsAuthPhase2(super::GsAuthPhase2Message),
+        #[prost(message, tag = "3")]
+        UavList(super::UavListMessage),
     }
 }

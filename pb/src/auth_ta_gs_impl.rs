@@ -19,6 +19,15 @@ impl auth_ta_gs::GsAuthResponse {
             )),
         }
     }
+    pub fn new_uav_list_message(uav_list_enc: Vec<u8>) -> Self {
+        Self {
+            response: Some(auth_ta_gs::gs_auth_response::Response::UavList(
+                auth_ta_gs::UavListMessage {
+                    uav_list_enc: Bytes::from(uav_list_enc),
+                },
+            )),
+        }
+    }
 }
 
 impl auth_ta_gs::GsAuthRequest {

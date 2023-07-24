@@ -20,7 +20,11 @@ pb = { path = "../pb" }
 mcore = { path = "../../mcore", features = ["std"] }
 anyhow = "1.0.72"
 lazy_static = "1.4.0"
-dashmap = "5.5.0"
+dashmap = { version = "5.5.0", features = ["serde"] }
 rand = "0.8.5"
 sha256 = "1.2.2"
 chrono = "0.4.26"
+rug = { version = "1.19.2", features = ["serde"] }
+serde = { version = "1.0.174", features = ["derive"] }
+serde_json = "1.0.103"
+aes-gcm = "0.10.2"

@@ -1,4 +1,6 @@
 mod codec;
+use crate::codec::gs_auth_codec::GsAuthCodec;
+use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit, Nonce};
 use codec::gs_register_codec::GsRegisterCodec;
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
@@ -11,6 +13,7 @@ use mcore::bn254::{big::BIG, ecp2::ECP2};
 use pb::auth_ta_gs::gs_auth_request;
 use pb::auth_ta_gs::GsAuthResponse;
 use rand::Rng;
+use rug::Integer;
 use std::net::{IpAddr, SocketAddr};
 use tokio::{
     io::AsyncReadExt,
@@ -18,8 +21,6 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 use tracing_subscriber::EnvFilter;
-
-use crate::codec::gs_auth_codec::GsAuthCodec;
 
 pub struct TAConfig {
     pub sk_ta: BIG,
@@ -34,8 +35,21 @@ pub struct GsInfo {
     pub ip_addr: IpAddr,
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct UavInfo {
+    pub uid: Vec<u8>,
+    pub ruid: Vec<u8>,
+    pub c: Vec<u8>,
+    pub r: Vec<u8>,
+    pub n: Integer,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct UavList(DashMap<String, UavInfo>);
+
 lazy_static! {
     static ref GS_LIST: DashMap<String, GsInfo> = DashMap::new();
+    static ref UAV_LIST: UavList = UavList(DashMap::new());
 }
 
 /// Init TA keys
@@ -66,6 +80,23 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("debug".parse().unwrap()))
         .init();
+
+    let uid = rand::thread_rng().gen::<[u8; 32]>().to_vec();
+    let ruid = rand::thread_rng().gen::<[u8; 32]>().to_vec();
+    let c = rand::thread_rng().gen::<[u8; 32]>().to_vec();
+    let r = rand::thread_rng().gen::<[u8; 32]>().to_vec();
+    // big endian
+    let n = Integer::from_digits(&r, rug::integer::Order::MsfBe).next_prime();
+
+    let uav_info = UavInfo {
+        uid: uid.clone(),
+        ruid,
+        c,
+        r,
+        n,
+    };
+    UAV_LIST.0.insert(uid.encode_hex(), uav_info);
+
     tracing::info!("sk_ta: {}", TA_CONFIG.sk_ta);
     tracing::info!("puk_ta: {}", TA_CONFIG.puk_ta);
     let addr: SocketAddr = ([0, 0, 0, 0], 8090).into();
@@ -129,7 +160,8 @@ async fn tcp_accept(stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
                     TA_CONFIG.puk_ta_bytes.clone(),
                 ))
                 .await?;
-            if let Some(Ok(res)) = framed.next().await {
+            // auth phase
+            let (status, puk_gs, hash_) = if let Some(Ok(res)) = framed.next().await {
                 if let Some(gs_auth_request::Request::GsAuthPhase1(param)) = res.request {
                     let t1 = std::time::Instant::now();
                     // check timestamp
@@ -161,11 +193,11 @@ async fn tcp_accept(stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
                     let hash_bytes = hex::decode(hash_str).unwrap();
                     let hash_ = BIG::frombytes(&hash_bytes);
                     let q = ECP2::generator().mul(&hash_);
-                    let p = ECP::frombytes(&param.puk_gs);
+                    let puk_gs = ECP::frombytes(&param.puk_gs);
 
                     let t2 = std::time::Instant::now();
                     // compute ta signature
-                    let sig_ = pair::ate(&q, &p);
+                    let sig_ = pair::ate(&q, &puk_gs);
                     let sig_ = pair::fexp(&sig_);
                     let sig_ = sig_.pow(&TA_CONFIG.sk_ta);
 
@@ -182,13 +214,41 @@ async fn tcp_accept(stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
                     };
                     tracing::info!("t1 time: {:?}", t1.elapsed());
                     tracing::info!("t2 time: {:?}", t2.elapsed());
-
                     framed
                         .send(GsAuthResponse::new_gs_auth_phase2_message(status))
                         .await?;
+                    (status, puk_gs, hash_)
                 } else {
                     anyhow::bail!("invalid request");
                 }
+            } else {
+                anyhow::bail!("invalid framed");
+            };
+
+            // means gs auth success, then send encryped uav list
+            if status == 0 {
+                let ssk_tags = puk_gs.mul(&TA_CONFIG.sk_ta).mul(&hash_);
+                let mut ssk_tags_bytes = vec![0u8; 65];
+                ssk_tags.tobytes(&mut ssk_tags_bytes, false);
+                let ssk_tags_bytes_sha2 = hex::decode(sha256::digest(&ssk_tags_bytes))?;
+
+                tracing::debug!("ssk_tags: {}", ssk_tags);
+
+                let key = Key::<Aes256Gcm>::from_slice(&ssk_tags_bytes_sha2);
+                let nonce = Nonce::from_slice(&ssk_tags_bytes_sha2[..12]);
+                let aes_gcm = aes_gcm::Aes256Gcm::new(key);
+
+                tracing::debug!("aes key: {}", hex::encode(&ssk_tags_bytes_sha2));
+                tracing::debug!("aes nonce: {}", hex::encode(nonce));
+
+                let input_str = serde_json::to_string(&UAV_LIST.0)?;
+                let input = input_str.as_bytes();
+
+                let output = aes_gcm.encrypt(nonce, input).unwrap();
+
+                framed
+                    .send(GsAuthResponse::new_uav_list_message(output))
+                    .await?;
             }
         }
         // unreadable
