@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
 use pb::auth_ta_gs::{GsAuthRequest, GsAuthResponse};
 use prost::Message;
 use tokio_util::codec;
@@ -39,7 +39,10 @@ impl codec::Decoder for GsAuthCodec {
         if buf_len < 4 {
             return Ok(None);
         }
-        let data_len = src.get_u32() as usize;
+        let mut length_bytes = [0u8; 4];
+        length_bytes.copy_from_slice(&src[..4]);
+        let data_len = u32::from_be_bytes(length_bytes) as usize;
+
         if data_len > Self::MAX_SIZE {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
@@ -47,13 +50,14 @@ impl codec::Decoder for GsAuthCodec {
             ));
         }
 
-        if buf_len < data_len {
-            src.reserve(data_len - buf_len);
+        let frame_len = 4 + data_len;
+        if buf_len < frame_len {
+            src.reserve(frame_len - buf_len);
             return Ok(None);
         }
 
-        let data = src.split_to(data_len);
-        let item = GsAuthRequest::decode(data)?;
+        let data = src.split_to(frame_len);
+        let item = GsAuthRequest::decode(&data[4..])?;
         Ok(Some(item))
     }
 }
