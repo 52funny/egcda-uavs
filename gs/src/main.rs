@@ -164,7 +164,7 @@ async fn auth(addr: &str) -> anyhow::Result<()> {
             anyhow::bail!("get auth phase2 failed");
         }
     } else {
-        anyhow::bail!("get gs auth response failed");
+        anyhow::bail!("get gs auth phase2 response failed");
     };
     tracing::info!("auth: {}", if status == 0 { "success" } else { "failed" });
     // means auth success
@@ -186,7 +186,7 @@ async fn auth(addr: &str) -> anyhow::Result<()> {
                 let nonce = Nonce::from_slice(&ssk_tags_bytes_sha2[..12]);
                 let aes_gcm = aes_gcm::Aes256Gcm::new(key);
                 tracing::debug!("aes key: {}", hex::encode(key));
-                tracing::debug!("aes key: {}", hex::encode(nonce));
+                tracing::debug!("aes nonce: {}", hex::encode(nonce));
 
                 // decrypt
                 let uav_list = aes_gcm.decrypt(nonce, uav_list_enc.as_ref()).unwrap();
@@ -195,12 +195,14 @@ async fn auth(addr: &str) -> anyhow::Result<()> {
                 uav_list.0.iter().for_each(|k| {
                     UAV_LIST.0.insert(k.key().clone(), k.value().clone());
                 });
-                tracing::info!("uav list: {:?}", UAV_LIST.0)
+                for (idx, item) in UAV_LIST.0.iter().enumerate() {
+                    tracing::debug!("uav{}: {:?}", idx + 1, item.value());
+                }
             } else {
                 anyhow::bail!("get uav list failed");
             }
         } else {
-            anyhow::bail!("get gs auth response failed");
+            anyhow::bail!("get uav list response failed");
         }
     }
     Ok(())

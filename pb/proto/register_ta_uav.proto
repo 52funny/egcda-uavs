@@ -27,19 +27,22 @@ message UavRegisterPhase3Message {
 
 
 // uav request message
-message UavRequest {
-    oneof request {
-        // it's including the UAV's response `r` from PUF
-        UavRegisterPhase2Message uav_register_phase2 = 1;
-        // it's including the UAV's uid and ruid
-        UavRegisterPhase3Message uav_register_phase3 = 2;
-    }
+message UavRegisterRequest {
+    // it's including the UAV's response `r` from PUF
+    UavRegisterPhase2Message uav_register_phase2 = 1;
 }
 
 // ta returns information to the UAV
 // use the status to indicate the result 
 // if status == 0, it means success
 // if status == 1, it means fail
-message UavResponse {
-    int32 status = 1;
+message UavRegisterResponse {
+    oneof response {
+        // it's including the UAV's challenge
+        UavRegisterPhase1Message uav_register_phase1 = 1;
+        // it's including the UAV's uid and ruid
+        UavRegisterPhase3Message uav_register_phase3 = 2;
+        // uav register status
+        int32 status = 3;
+    }
 }

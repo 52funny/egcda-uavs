@@ -30,23 +30,10 @@ pub struct UavRegisterPhase3Message {
 #[derive(PartialOrd)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct UavRequest {
-    #[prost(oneof = "uav_request::Request", tags = "1, 2")]
-    pub request: ::core::option::Option<uav_request::Request>,
-}
-/// Nested message and enum types in `UavRequest`.
-pub mod uav_request {
-    #[derive(PartialOrd)]
-    #[allow(clippy::derive_partial_eq_without_eq)]
-    #[derive(Clone, PartialEq, ::prost::Oneof)]
-    pub enum Request {
-        /// it's including the UAV's response `r` from PUF
-        #[prost(message, tag = "1")]
-        UavRegisterPhase2(super::UavRegisterPhase2Message),
-        /// it's including the UAV's uid and ruid
-        #[prost(message, tag = "2")]
-        UavRegisterPhase3(super::UavRegisterPhase3Message),
-    }
+pub struct UavRegisterRequest {
+    /// it's including the UAV's response `r` from PUF
+    #[prost(message, optional, tag = "1")]
+    pub uav_register_phase2: ::core::option::Option<UavRegisterPhase2Message>,
 }
 /// ta returns information to the UAV
 /// use the status to indicate the result
@@ -55,7 +42,24 @@ pub mod uav_request {
 #[derive(PartialOrd)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct UavResponse {
-    #[prost(int32, tag = "1")]
-    pub status: i32,
+pub struct UavRegisterResponse {
+    #[prost(oneof = "uav_register_response::Response", tags = "1, 2, 3")]
+    pub response: ::core::option::Option<uav_register_response::Response>,
+}
+/// Nested message and enum types in `UavRegisterResponse`.
+pub mod uav_register_response {
+    #[derive(PartialOrd)]
+    #[allow(clippy::derive_partial_eq_without_eq)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Response {
+        /// it's including the UAV's challenge
+        #[prost(message, tag = "1")]
+        UavRegisterPhase1(super::UavRegisterPhase1Message),
+        /// it's including the UAV's uid and ruid
+        #[prost(message, tag = "2")]
+        UavRegisterPhase3(super::UavRegisterPhase3Message),
+        /// uav register status
+        #[prost(int32, tag = "3")]
+        Status(i32),
+    }
 }
