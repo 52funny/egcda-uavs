@@ -132,7 +132,7 @@ pub async fn auth(addr: &str) -> anyhow::Result<()> {
                     UAV_LIST.0.insert(k.key().clone(), k.value().clone());
                 });
                 for (idx, item) in UAV_LIST.0.iter().enumerate() {
-                    tracing::debug!("uav{}: {:?}", idx + 1, item.value());
+                    tracing::debug!("uav{}: {}", idx + 1, item.value());
                 }
             } else {
                 anyhow::bail!("get uav list failed");

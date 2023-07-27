@@ -18,15 +18,34 @@ message UavAuthGsPublicParamMessage {
     bytes c = 5;
 }
 
+// When the UAV receives the UavAuthGsPublicParam message
+// It will send the UavAuthPhase1Message to the GS.
+message UavAuthPhase1Message {
+    int64 t_u = 1;
+    bytes tuid_i = 2;
+    bytes r_u = 3;
+    bytes v_i = 4;
+    bytes gamma_i = 5;
+}
+
+// When the GS receives the UavAuthPhase1Message
+// It will send the UavAuthPhase2Message to the UAV.
+// If the status is 0, it means the UAV is authenticated successfully.
+message UavAuthPhase2Message {
+    int32 status = 1;
+}
+
 
 message UavAuthRequest {
     oneof request {
         UavAuthHelloMessage hello = 1;
+        UavAuthPhase1Message uav_auth_phase1 = 2;
     }
 }
 
 message UavAuthResponse {
     oneof response {
         UavAuthGsPublicParamMessage gs_public_param = 1;
+        UavAuthPhase2Message uav_auth_phase2 = 2;
     }
 }

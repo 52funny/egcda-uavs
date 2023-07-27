@@ -7,6 +7,7 @@ use mcore::bn254::big::BIG;
 use mcore::bn254::ecp::ECP;
 use rand::{thread_rng, Rng};
 use rug::Integer;
+use std::fmt::Display;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
@@ -27,6 +28,18 @@ pub struct UavInfo {
     pub c: Vec<u8>,
     pub r: Vec<u8>,
     pub n: Integer,
+}
+
+impl Display for UavInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UavInfo")
+            .field("uid", &hex::encode(&self.uid))
+            .field("ruid", &hex::encode(&self.ruid))
+            .field("c", &hex::encode(&self.c))
+            .field("r", &hex::encode(&self.r))
+            .field("n", &self.n.to_string_radix(16))
+            .finish()
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
