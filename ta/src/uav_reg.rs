@@ -54,7 +54,7 @@ pub async fn uav_register(stream: TcpStream, _addr: SocketAddr) -> anyhow::Resul
         .await?;
     UAV_LIST
         .0
-        .insert(hex::encode(&uid), UavInfo { uid, ruid, c, r, n });
+        .insert(hex::encode(&ruid), UavInfo { uid, ruid, c, r, n });
     tracing::info!("uav register success");
     Ok(())
 }
