@@ -82,6 +82,10 @@ async fn tcp_server(addr: SocketAddr) -> anyhow::Result<()> {
     let socket = TcpListener::bind(addr).await?;
     loop {
         let (stream, _addr) = socket.accept().await?;
-        tokio::spawn(uav_auth(stream, addr));
+        tokio::spawn(async move {
+            if let Err(e) = uav_auth(stream, addr).await {
+                tracing::warn!("{}", e);
+            }
+        });
     }
 }

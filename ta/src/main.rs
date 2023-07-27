@@ -79,7 +79,11 @@ async fn main() -> anyhow::Result<()> {
     loop {
         // accept connections and process them serially
         let (stream, addr) = listener.accept().await?;
-        tokio::spawn(tcp_accept(stream, addr));
+        tokio::spawn(async move {
+            if let Err(e) = tcp_accept(stream, addr).await {
+                tracing::warn!("{}", e);
+            }
+        });
     }
 }
 
