@@ -1,12 +1,16 @@
 mod codec;
 mod reg_auth;
+mod uav_auth;
 use crate::reg_auth::{auth, register};
 use dashmap::DashMap;
 use mcore::bn254::big::BIG;
 use mcore::bn254::ecp::ECP;
 use rand::{thread_rng, Rng};
 use rug::Integer;
+use std::net::SocketAddr;
+use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
+use uav_auth::uav_auth;
 
 pub struct GSConfig {
     pub gid: [u8; 32],
@@ -62,8 +66,22 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("debug".parse().unwrap()))
         .init();
 
-    let addr = "127.0.0.1:8090";
-    register(addr).await?;
-    auth(addr).await?;
+    let ta_addr = "127.0.0.1:8090";
+    // register self to TA
+    register(ta_addr).await?;
+    // auth self to TA
+    auth(ta_addr).await?;
+
+    // spawn a server to listen to UAVs connection
+    let bind_addr = "127.0.0.1:8091";
+    tcp_server(bind_addr.parse::<SocketAddr>()?).await?;
     Ok(())
+}
+
+async fn tcp_server(addr: SocketAddr) -> anyhow::Result<()> {
+    let socket = TcpListener::bind(addr).await?;
+    loop {
+        let (stream, _addr) = socket.accept().await?;
+        tokio::spawn(uav_auth(stream, addr));
+    }
 }

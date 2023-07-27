@@ -1,0 +1,32 @@
+syntax = "proto3";
+package auth_gs_uav;
+
+// It is a message that is sent by the UAV to the GS at the first time.
+// It include uav's ruid 
+message UavAuthHelloMessage{
+    bytes ruid = 1;
+}
+
+
+// When the GS receives the Uav hello message
+// It will send the UavAuthGsPublicParam message to the UAV.
+message UavAuthGsPublicParamMessage {
+    int64 t_gs = 1;
+    bytes id_gs = 2;
+    bytes r_gs = 3;
+    bytes q_gs = 4;
+    bytes c = 5;
+}
+
+
+message UavAuthRequest {
+    oneof request {
+        UavAuthHelloMessage hello = 1;
+    }
+}
+
+message UavAuthResponse {
+    oneof response {
+        UavAuthGsPublicParamMessage gs_public_param = 1;
+    }
+}
