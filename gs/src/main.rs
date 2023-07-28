@@ -1,6 +1,6 @@
 mod codec;
 mod reg_auth;
-mod uav_auth;
+mod uav_auth_comm;
 use crate::reg_auth::{auth, register};
 use dashmap::DashMap;
 use mcore::bn254::big::BIG;
@@ -8,10 +8,10 @@ use mcore::bn254::ecp::ECP;
 use rand::{thread_rng, Rng};
 use rug::Integer;
 use std::fmt::Display;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
-use uav_auth::uav_auth;
+use uav_auth_comm::uav_auth_communicate;
 
 pub struct GSConfig {
     pub gid: [u8; 32],
@@ -23,6 +23,15 @@ pub struct GSConfig {
 }
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct UavInfo {
+    pub uid: Vec<u8>,
+    pub ruid: Vec<u8>,
+    pub c: Vec<u8>,
+    pub r: Vec<u8>,
+    pub n: Integer,
+}
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+pub struct UavAuthInfo {
+    pub ip_addr: IpAddr,
     pub uid: Vec<u8>,
     pub ruid: Vec<u8>,
     pub c: Vec<u8>,
@@ -45,9 +54,13 @@ impl Display for UavInfo {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UavList(DashMap<String, UavInfo>);
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct UavAuthList(DashMap<String, UavAuthInfo>);
+
 lazy_static::lazy_static! {
     pub static ref GS_CONFIG: GSConfig = init_gs_keys();
     pub static ref UAV_LIST: UavList = UavList(DashMap::new());
+    pub static ref UAV_AUTH_LIST: UavAuthList = UavAuthList(DashMap::new());
 }
 
 /// Init GS keys
@@ -96,7 +109,7 @@ async fn tcp_server(addr: SocketAddr) -> anyhow::Result<()> {
     loop {
         let (stream, _addr) = socket.accept().await?;
         tokio::spawn(async move {
-            if let Err(e) = uav_auth(stream, addr).await {
+            if let Err(e) = uav_auth_communicate(stream, addr).await {
                 tracing::warn!("{}", e);
             }
         });
