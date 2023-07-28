@@ -1,14 +1,21 @@
 use crate::communicate_gs_uav::{
-    uav_gs_communicate_response::Response, CommunicateMessage, CommunicateParamMessage,
-    UavGsCommunicateRequest, UavGsCommunicateResponse,
+    uav_gs_communicate_request::Request, uav_gs_communicate_response::Response, CommunicateMessage,
+    CommunicateParamMessage, UavGsCommunicateRequest, UavGsCommunicateResponse, UavRuidListMessage,
 };
 
 impl UavGsCommunicateRequest {
     pub fn new_communicate_message(communicate_message: Vec<u8>) -> Self {
         Self {
-            communicate_message: Some(CommunicateMessage {
+            request: Some(Request::CommunicateMessage(CommunicateMessage {
                 encrypted_data: communicate_message.into(),
-            }),
+            })),
+        }
+    }
+    pub fn new_need_communicate_ruid_list(ruid: Vec<String>) -> Self {
+        Self {
+            request: Some(Request::NeedCommunicateRuidList(UavRuidListMessage {
+                ruid,
+            })),
         }
     }
 }
@@ -27,6 +34,13 @@ impl UavGsCommunicateResponse {
         Self {
             response: Some(Response::CommunicateMessage(CommunicateMessage {
                 encrypted_data: message.into(),
+            })),
+        }
+    }
+    pub fn new_already_communicate_ruid_list(ruid: Vec<String>) -> Self {
+        Self {
+            response: Some(Response::AlreadyAuthenticatedRuidList(UavRuidListMessage {
+                ruid,
             })),
         }
     }

@@ -21,6 +21,7 @@ pub struct GSConfig {
     pub sk_gs_bytes: Vec<u8>,
     pub puk_gs_bytes: Vec<u8>,
 }
+
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct UavInfo {
     pub uid: Vec<u8>,
@@ -54,6 +55,8 @@ impl Display for UavInfo {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UavList(DashMap<String, UavInfo>);
 
+pub type UavAuthListState = DashMap<String, futures_channel::mpsc::UnboundedSender<String>>;
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UavAuthList(DashMap<String, UavAuthInfo>);
 
@@ -61,6 +64,7 @@ lazy_static::lazy_static! {
     pub static ref GS_CONFIG: GSConfig = init_gs_keys();
     pub static ref UAV_LIST: UavList = UavList(DashMap::new());
     pub static ref UAV_AUTH_LIST: UavAuthList = UavAuthList(DashMap::new());
+    pub static ref UAV_AUTH_LIST_STATE: UavAuthListState = UavAuthListState::new();
 }
 
 /// Init GS keys

@@ -13,9 +13,18 @@ message CommunicateParamMessage {
     bytes c = 3;
 }
 
+
+// Message including the ruid list
+message UavRuidListMessage {
+    repeated string ruid = 1;
+}
+
 // The request message used to communicate uav to gs
 message UavGsCommunicateRequest {
-    CommunicateMessage communicate_message = 1;
+    oneof request {
+        CommunicateMessage communicate_message = 1;
+        UavRuidListMessage need_communicate_ruid_list = 2;
+    }
 }
 
 // The response message used to communicate gs to uav
@@ -23,5 +32,6 @@ message UavGsCommunicateResponse {
     oneof response {
         CommunicateParamMessage communicate_param = 1;
         CommunicateMessage communicate_message = 2;
+        UavRuidListMessage already_authenticated_ruid_list = 3;
     }
-}
+}   

@@ -18,20 +18,40 @@ pub struct CommunicateParamMessage {
     #[prost(bytes = "bytes", tag = "3")]
     pub c: ::prost::bytes::Bytes,
 }
+/// Message including the ruid list
+#[derive(PartialOrd)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UavRuidListMessage {
+    #[prost(string, repeated, tag = "1")]
+    pub ruid: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
 /// The request message used to communicate uav to gs
 #[derive(PartialOrd)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UavGsCommunicateRequest {
-    #[prost(message, optional, tag = "1")]
-    pub communicate_message: ::core::option::Option<CommunicateMessage>,
+    #[prost(oneof = "uav_gs_communicate_request::Request", tags = "1, 2")]
+    pub request: ::core::option::Option<uav_gs_communicate_request::Request>,
+}
+/// Nested message and enum types in `UavGsCommunicateRequest`.
+pub mod uav_gs_communicate_request {
+    #[derive(PartialOrd)]
+    #[allow(clippy::derive_partial_eq_without_eq)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Request {
+        #[prost(message, tag = "1")]
+        CommunicateMessage(super::CommunicateMessage),
+        #[prost(message, tag = "2")]
+        NeedCommunicateRuidList(super::UavRuidListMessage),
+    }
 }
 /// The response message used to communicate gs to uav
 #[derive(PartialOrd)]
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UavGsCommunicateResponse {
-    #[prost(oneof = "uav_gs_communicate_response::Response", tags = "1, 2")]
+    #[prost(oneof = "uav_gs_communicate_response::Response", tags = "1, 2, 3")]
     pub response: ::core::option::Option<uav_gs_communicate_response::Response>,
 }
 /// Nested message and enum types in `UavGsCommunicateResponse`.
@@ -44,5 +64,7 @@ pub mod uav_gs_communicate_response {
         CommunicateParam(super::CommunicateParamMessage),
         #[prost(message, tag = "2")]
         CommunicateMessage(super::CommunicateMessage),
+        #[prost(message, tag = "3")]
+        AlreadyAuthenticatedRuidList(super::UavRuidListMessage),
     }
 }

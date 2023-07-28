@@ -540,6 +540,7 @@ dependencies = [
  "crypto",
  "dashmap",
  "futures",
+ "futures-channel",
  "hex",
  "hex-literal",
  "lazy_static",

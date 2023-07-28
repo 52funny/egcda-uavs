@@ -1,6 +1,6 @@
 use crate::codec::uav_auth_codec::UavAuthCodec;
 use crate::codec::uav_communicate_codec::UavGsCommunicateCodec;
-use crate::{UavAuthInfo, UavInfo, GS_CONFIG, UAV_AUTH_LIST, UAV_LIST};
+use crate::{UavAuthInfo, UavInfo, GS_CONFIG, UAV_AUTH_LIST, UAV_AUTH_LIST_STATE, UAV_LIST};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use dashmap::Map;
@@ -11,28 +11,59 @@ use mcore::bn254::ecp2::ECP2;
 use mcore::bn254::pair;
 use pb::auth_gs_uav::uav_auth_request::Request;
 use pb::auth_gs_uav::UavAuthResponse;
-use pb::communicate_gs_uav::UavGsCommunicateResponse;
+use pb::communicate_gs_uav::{uav_gs_communicate_request, UavGsCommunicateResponse};
 use rand::Rng;
 use rug::Integer;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
 pub async fn uav_auth_communicate(mut stream: TcpStream, _addr: SocketAddr) -> anyhow::Result<()> {
     tracing::debug!("---------------------------uav auth---------------------------");
-    let (uav_auth_info, status) = uav_auth(&mut stream, _addr).await?;
+    let (uav_info, status) = uav_auth(&mut stream, _addr).await?;
     tracing::debug!("---------------------------uav auth---------------------------");
     tracing::info!("uav auth result: {}", if status { "ok" } else { "fail" });
+    if !status {
+        return Ok(());
+    }
+
+    let key = hex::encode(&uav_info.ruid);
+    let uav_auth_info = crate::UavAuthInfo {
+        ip_addr: _addr.ip(),
+        uid: uav_info.uid,
+        ruid: uav_info.ruid,
+        c: uav_info.c,
+        r: uav_info.r,
+        n: uav_info.n,
+    };
+    let (tx, rx) = futures_channel::mpsc::unbounded::<String>();
+    let tx2 = tx.clone();
+    UAV_AUTH_LIST_STATE.insert(key.clone(), tx);
+
+    UAV_AUTH_LIST_STATE
+        .iter()
+        .filter(|k| *k.key() != key)
+        .for_each(|k| {
+            // send uav auth ruid to already connected uav
+            k.value().unbounded_send(key.clone()).unwrap();
+            // send already connected uav ruid to myself
+            tx2.unbounded_send(k.key().clone()).unwrap();
+        });
+
+    UAV_AUTH_LIST.0._insert(key.clone(), uav_auth_info.clone());
 
     tracing::debug!("---------------------uav gs communication---------------------");
-    uav_commuicate(&mut stream, _addr, uav_auth_info).await?;
+    uav_commuicate(&mut stream, _addr, rx, uav_auth_info).await?;
     tracing::debug!("---------------------uav gs communication---------------------");
+
+    UAV_AUTH_LIST_STATE.remove(&key);
     Ok(())
 }
 
 async fn uav_commuicate(
     stream: &mut TcpStream,
     _addr: SocketAddr,
+    rx: futures_channel::mpsc::UnboundedReceiver<String>,
     uav_auth_info: UavAuthInfo,
 ) -> anyhow::Result<()> {
     let mut framed = Framed::new(stream, UavGsCommunicateCodec);
@@ -59,20 +90,37 @@ async fn uav_commuicate(
     let nonce = Nonce::from_slice(&key[..12]);
 
     tracing::debug!("key: {}", hex::encode(key));
-    while let Some(Ok(res)) = framed.next().await {
-        if let Some(message) = res.communicate_message {
-            let b: &[u8] = &message.encrypted_data;
-            let data = aes.decrypt(nonce, b).unwrap();
-            tracing::info!("gs recv uav data: {:?}", data);
+
+    let (outgoing, incoming) = framed.split();
+
+    let receiver = incoming.for_each(|res| async {
+        if let Ok(res) = res {
+            match res.request {
+                Some(uav_gs_communicate_request::Request::CommunicateMessage(message)) => {
+                    let b: &[u8] = &message.encrypted_data;
+                    let data = aes.decrypt(nonce, b).unwrap();
+                    tracing::info!("gs recv uav data: {:?}", data);
+                }
+                Some(uav_gs_communicate_request::Request::NeedCommunicateRuidList(list)) => {
+                    tracing::info!("gs recv uav param: {:?}", list.ruid);
+                }
+                _ => {}
+            }
         }
-    }
+    });
+    let sender = rx
+        .map(|x| UavGsCommunicateResponse::new_already_communicate_ruid_list(vec![x]))
+        .map(Ok)
+        .forward(outgoing);
+
+    futures::pin_mut!(receiver, sender);
+
+    futures::future::select(receiver, sender).await;
+
     Ok(())
 }
 
-async fn uav_auth(
-    stream: &mut TcpStream,
-    _addr: SocketAddr,
-) -> anyhow::Result<(UavAuthInfo, bool)> {
+async fn uav_auth(stream: &mut TcpStream, _addr: SocketAddr) -> anyhow::Result<(UavInfo, bool)> {
     let mut framed = Framed::new(stream, UavAuthCodec);
     let ruid = if let Some(Ok(res)) = framed.next().await {
         if let Some(Request::Hello(ruid)) = res.request {
@@ -113,9 +161,8 @@ async fn uav_auth(
         .await?;
 
     // auth phase
-    let uav_auth_info =
-        uav_auth_phase(&mut framed, _addr.ip(), uav_info, id_gs, random_gs, r_gs).await?;
-    Ok(uav_auth_info)
+    let status = uav_auth_phase(&mut framed, &uav_info, id_gs, random_gs, r_gs).await?;
+    Ok((uav_info, status))
 }
 
 /// 10 second
@@ -183,12 +230,11 @@ async fn public_param() -> anyhow::Result<(Vec<u8>, i64, Vec<u8>, Vec<u8>, Vec<u
 
 async fn uav_auth_phase(
     framed: &mut Framed<&mut TcpStream, UavAuthCodec>,
-    ip_addr: IpAddr,
-    uav_info: UavInfo,
+    uav_info: &UavInfo,
     id_gs: Vec<u8>,
     random_gs: Vec<u8>,
     r_gs: Vec<u8>,
-) -> anyhow::Result<(UavAuthInfo, bool)> {
+) -> anyhow::Result<bool> {
     let phase = if let Some(Ok(res)) = framed.next().await {
         if let Some(Request::UavAuthPhase1(p)) = res.request {
             p
@@ -246,24 +292,10 @@ async fn uav_auth_phase(
 
     let status = if p1.equals(&p2) { 0 } else { 1 };
 
-    let key = hex::encode(&uav_info.ruid);
-    let uav_auth = crate::UavAuthInfo {
-        ip_addr,
-        uid: uav_info.uid,
-        ruid: uav_info.ruid,
-        c: uav_info.c,
-        r: uav_info.r,
-        n: uav_info.n,
-    };
-    // if auth success
-    // insert uav info into UavAuthList
-    if status == 0 {
-        UAV_AUTH_LIST.0._insert(key, uav_auth.clone());
-    }
     tracing::info!("spend time: {:?}", t.elapsed());
     // send status to uav
     framed
         .send(UavAuthResponse::new_uav_auth_phase2_message(status))
         .await?;
-    Ok((uav_auth, status == 0))
+    Ok(status == 0)
 }

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::codec::uav_auth_codec::UavAuthCodec;
 use crate::codec::uav_communicate_codec::UavGsCommunicateCodec;
 use crate::{PUF, UAV};
@@ -126,7 +128,6 @@ async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
 
 async fn communicate(stream: TcpStream) -> anyhow::Result<()> {
     let mut framed = Framed::new(stream, UavGsCommunicateCodec);
-    framed.flush().await?;
     framed
         .send(UavGsCommunicateRequest::new_communicate_message(vec![]))
         .await?;
@@ -174,10 +175,35 @@ async fn communicate(stream: TcpStream) -> anyhow::Result<()> {
 
     tracing::debug!("key: {}", hex::encode(key));
 
+    let (mut outgoing, incoming) = framed.split();
+
     let input = "hello".as_bytes();
-    let output = aes.encrypt(nonce, input).unwrap();
-    framed
-        .send(UavGsCommunicateRequest::new_communicate_message(output))
-        .await?;
+    let sender = async {
+        loop {
+            let output = aes.encrypt(nonce, input).unwrap();
+            let _ = outgoing
+                .send(UavGsCommunicateRequest::new_communicate_message(output))
+                .await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    };
+    let receiver = incoming.for_each(|res| async {
+        if let Ok(res) = res {
+            match res.response {
+                Some(uav_gs_communicate_response::Response::CommunicateMessage(message)) => {
+                    let b: &[u8] = &message.encrypted_data;
+                    let output = aes.decrypt(nonce, b).unwrap();
+                    tracing::debug!("message: {}", String::from_utf8_lossy(&output));
+                }
+                Some(uav_gs_communicate_response::Response::AlreadyAuthenticatedRuidList(list)) => {
+                    tracing::debug!("online uav: {:?}", list);
+                }
+                Some(_) => {}
+                _ => {}
+            }
+        }
+    });
+    futures::pin_mut!(sender, receiver);
+    futures::future::select(sender, receiver).await;
     Ok(())
 }
