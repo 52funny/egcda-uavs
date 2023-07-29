@@ -1,4 +1,4 @@
-use crate::{codec, UavList, GS_CONFIG, UAV_LIST};
+use crate::{codec, UavList, GS_CONFIG, UAV_FAKE_PRIME, UAV_LIST};
 use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit, Nonce};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
@@ -7,6 +7,8 @@ use mcore::bn254::ecp::ECP;
 use mcore::bn254::ecp2::ECP2;
 use mcore::bn254::pair;
 use pb::auth_ta_gs::gs_auth_response::Response;
+use rand::Rng;
+use rug::Integer;
 use std::mem::MaybeUninit;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tokio_util::codec::Framed;
@@ -128,12 +130,33 @@ pub async fn auth(addr: &str) -> anyhow::Result<()> {
                 let uav_list = aes_gcm.decrypt(nonce, uav_list_enc.as_ref()).unwrap();
 
                 let uav_list: UavList = serde_json::from_slice(&uav_list)?;
+
+                // construct n unrelated prime numbers
+                let n = uav_list.0.len();
+                let mut i = 0;
+                while i < n {
+                    let prime: Integer = Integer::from_digits(
+                        &rand::thread_rng().gen::<[u8; 32]>(),
+                        rug::integer::Order::MsfBe,
+                    )
+                    .next_prime();
+                    for uav in &uav_list.0 {
+                        if uav.value().n != prime {
+                            UAV_FAKE_PRIME.lock().await.push(prime);
+                            i += 1;
+                            break;
+                        }
+                    }
+                }
+
                 uav_list.0.iter().for_each(|k| {
                     UAV_LIST.0.insert(k.key().clone(), k.value().clone());
                 });
+
                 for (idx, item) in UAV_LIST.0.iter().enumerate() {
                     tracing::debug!("uav{}: {}", idx + 1, item.value());
                 }
+                tracing::info!("fake prime: {:?}", UAV_FAKE_PRIME.lock().await);
             } else {
                 anyhow::bail!("get uav list failed");
             }

@@ -1,9 +1,10 @@
 use crate::codec::uav_auth_codec::UavAuthCodec;
 use crate::codec::uav_communicate_codec::UavGsCommunicateCodec;
-use crate::{UavAuthInfo, UavInfo, GS_CONFIG, UAV_AUTH_LIST, UAV_AUTH_LIST_STATE, UAV_LIST};
+use crate::{
+    UavAuthInfo, UavInfo, GS_CONFIG, UAV_AUTH_LIST, UAV_AUTH_LIST_STATE, UAV_FAKE_PRIME, UAV_LIST,
+};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
-use dashmap::Map;
 use futures::{SinkExt, StreamExt};
 use mcore::bn254::big::BIG;
 use mcore::bn254::ecp::ECP;
@@ -36,7 +37,8 @@ pub async fn uav_auth_communicate(mut stream: TcpStream, _addr: SocketAddr) -> a
         r: uav_info.r,
         n: uav_info.n,
     };
-    let (tx, rx) = futures_channel::mpsc::unbounded::<String>();
+    UAV_AUTH_LIST.0.insert(key.clone(), uav_auth_info.clone());
+    let (tx, rx) = futures_channel::mpsc::unbounded::<(String, String)>();
     let tx2 = tx.clone();
     UAV_AUTH_LIST_STATE.insert(key.clone(), tx);
 
@@ -44,26 +46,27 @@ pub async fn uav_auth_communicate(mut stream: TcpStream, _addr: SocketAddr) -> a
         .iter()
         .filter(|k| *k.key() != key)
         .for_each(|k| {
-            // send uav auth ruid to already connected uav
-            k.value().unbounded_send(key.clone()).unwrap();
-            // send already connected uav ruid to myself
-            tx2.unbounded_send(k.key().clone()).unwrap();
+            // send my own ruid to the connected drone
+            k.value()
+                .unbounded_send((key.clone(), _addr.ip().to_string()))
+                .unwrap();
+            // send the connected drone ruid to myself
+            let other = UAV_AUTH_LIST.0.get(k.key()).unwrap();
+            tx2.unbounded_send((k.key().clone(), other.ip_addr.to_string()))
+                .unwrap();
         });
 
-    UAV_AUTH_LIST.0._insert(key.clone(), uav_auth_info.clone());
-
-    tracing::debug!("---------------------uav gs communication---------------------");
-    uav_commuicate(&mut stream, _addr, rx, uav_auth_info).await?;
-    tracing::debug!("---------------------uav gs communication---------------------");
-
+    let res = uav_commuicate(&mut stream, _addr, rx, uav_auth_info).await;
     UAV_AUTH_LIST_STATE.remove(&key);
+
+    res?;
     Ok(())
 }
 
 async fn uav_commuicate(
     stream: &mut TcpStream,
     _addr: SocketAddr,
-    rx: futures_channel::mpsc::UnboundedReceiver<String>,
+    rx: futures_channel::mpsc::UnboundedReceiver<(String, String)>,
     uav_auth_info: UavAuthInfo,
 ) -> anyhow::Result<()> {
     let mut framed = Framed::new(stream, UavGsCommunicateCodec);
@@ -93,6 +96,8 @@ async fn uav_commuicate(
 
     let (outgoing, incoming) = framed.split();
 
+    let (param_tx, param_rx) = futures_channel::mpsc::unbounded::<(Vec<u8>, Vec<String>)>();
+
     let receiver = incoming.for_each(|res| async {
         if let Ok(res) = res {
             match res.request {
@@ -103,15 +108,78 @@ async fn uav_commuicate(
                 }
                 Some(uav_gs_communicate_request::Request::NeedCommunicateRuidList(list)) => {
                     tracing::info!("gs recv uav param: {:?}", list.ruid);
+                    // 128 bit
+                    let kd = rand::thread_rng().gen::<[u8; 16]>();
+                    let kd = Integer::from_digits(&kd, rug::integer::Order::MsfBe);
+                    let total = UAV_LIST.0.len();
+                    let mut prime_list = Vec::<Integer>::with_capacity(total);
+                    for ruid in &list.ruid {
+                        prime_list.push(UAV_AUTH_LIST.0.get(ruid).unwrap().n.clone());
+                    }
+
+                    tracing::debug!("kd: {}", kd.to_string_radix(16));
+
+                    let fake_prime = UAV_FAKE_PRIME.lock().await;
+                    let need = fake_prime.len() - list.ruid.len();
+                    let idx = rand::thread_rng().gen_range(0..total);
+                    for i in 0..need {
+                        prime_list.push(fake_prime[(idx + i) % total].clone());
+                    }
+                    drop(fake_prime);
+
+                    tracing::info!("prime list: {:?}", prime_list);
+
+                    let n = prime_list.iter().fold(Integer::from(1), |acc, x| acc * x);
+                    let m_list = prime_list.iter().map(|x| n.clone() / x).collect::<Vec<_>>();
+
+                    let mut m_inv_list = Vec::with_capacity(total);
+                    let mut var = Vec::with_capacity(total);
+                    let mut u = Integer::from(0);
+                    for i in 0..total {
+                        let inv = m_list[i].clone().invert(&prime_list[i]).unwrap();
+                        m_inv_list.push(inv);
+                        let var_i = m_inv_list[i].clone() * &m_list[i];
+                        u += &var_i;
+                        var.push(var_i);
+                    }
+                    tracing::debug!("n: {}", n.to_string_radix(16));
+                    tracing::debug!("u: {}", u.to_string_radix(16));
+                    let ssk = kd * &u;
+                    let ssk = ssk.to_digits(rug::integer::Order::MsfBe);
+                    tracing::info!("ssk: {}", hex::encode(&ssk));
+
+                    let mut c_list = Vec::with_capacity(list.ruid.len());
+
+                    for r in &list.ruid {
+                        c_list.push(hex::encode(&UAV_LIST.0.get(r).unwrap().c));
+                    }
+                    let _ = param_tx.unbounded_send((ssk, c_list));
                 }
                 _ => {}
             }
         }
     });
-    let sender = rx
-        .map(|x| UavGsCommunicateResponse::new_already_communicate_ruid_list(vec![x]))
-        .map(Ok)
-        .forward(outgoing);
+
+    let sender = async move {
+        let mut param_rx = param_rx;
+        let mut rx = rx;
+        let mut outgoing = outgoing;
+        loop {
+            let message = tokio::select! {
+                Some((ruid, ip_addr)) = rx.next() => {
+                    UavGsCommunicateResponse::new_already_communicate_ruid_list(ruid, ip_addr)
+                }
+                Some((ssk, c_list)) = param_rx.next() => {
+                    UavGsCommunicateResponse::new_uav_communicate_param(ssk, c_list)
+                }
+            };
+
+            let res = outgoing.send(message).await;
+            if res.is_err() {
+                break;
+            }
+        }
+    };
 
     futures::pin_mut!(receiver, sender);
 

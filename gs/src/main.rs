@@ -3,6 +3,7 @@ mod reg_auth;
 mod uav_auth_comm;
 use crate::reg_auth::{auth, register};
 use dashmap::DashMap;
+use futures::lock::Mutex;
 use mcore::bn254::big::BIG;
 use mcore::bn254::ecp::ECP;
 use rand::{thread_rng, Rng};
@@ -55,7 +56,8 @@ impl Display for UavInfo {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UavList(DashMap<String, UavInfo>);
 
-pub type UavAuthListState = DashMap<String, futures_channel::mpsc::UnboundedSender<String>>;
+pub type UavAuthListState =
+    DashMap<String, futures_channel::mpsc::UnboundedSender<(String, String)>>;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UavAuthList(DashMap<String, UavAuthInfo>);
@@ -65,6 +67,7 @@ lazy_static::lazy_static! {
     pub static ref UAV_LIST: UavList = UavList(DashMap::new());
     pub static ref UAV_AUTH_LIST: UavAuthList = UavAuthList(DashMap::new());
     pub static ref UAV_AUTH_LIST_STATE: UavAuthListState = UavAuthListState::new();
+    pub static ref UAV_FAKE_PRIME: Mutex<Vec<Integer>> = Mutex::new(vec![]);
 }
 
 /// Init GS keys

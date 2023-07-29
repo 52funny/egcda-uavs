@@ -15,15 +15,26 @@ message CommunicateParamMessage {
 
 
 // Message including the ruid list
-message UavRuidListMessage {
+message NeedCommunicateRuidListMessage {
     repeated string ruid = 1;
 }
+
+message UavRuidListMessage {
+    string ruid = 1;
+    string ip_addr = 2;
+}
+
+message UavCommunicateParamMessage {
+    bytes ssk = 1;
+    repeated string c = 2;
+}
+
 
 // The request message used to communicate uav to gs
 message UavGsCommunicateRequest {
     oneof request {
         CommunicateMessage communicate_message = 1;
-        UavRuidListMessage need_communicate_ruid_list = 2;
+        NeedCommunicateRuidListMessage need_communicate_ruid_list = 2;
     }
 }
 
@@ -33,5 +44,6 @@ message UavGsCommunicateResponse {
         CommunicateParamMessage communicate_param = 1;
         CommunicateMessage communicate_message = 2;
         UavRuidListMessage already_authenticated_ruid_list = 3;
+        UavCommunicateParamMessage uav_communicate_param = 4;
     }
 }   

@@ -1,10 +1,9 @@
-use std::time::Duration;
-
 use crate::codec::uav_auth_codec::UavAuthCodec;
 use crate::codec::uav_communicate_codec::UavGsCommunicateCodec;
-use crate::{PUF, UAV};
+use crate::{PUF, UAV, UAV_RUID_LIST};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::{SinkExt, StreamExt};
 use mcore::bn254;
 use mcore::bn254::big::BIG;
@@ -15,7 +14,11 @@ use rand::Rng;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-pub async fn auth_comm(addr: &str) -> anyhow::Result<()> {
+pub async fn auth_comm(
+    addr: &str,
+    anonym_rx: UnboundedReceiver<Vec<String>>,
+    param_tx: UnboundedSender<(Vec<u8>, Vec<String>)>,
+) -> anyhow::Result<()> {
     let mut stream = TcpStream::connect(addr).await?;
     tracing::debug!("---------------------------uav auth---------------------------");
     let status = auth(&mut stream).await?;
@@ -24,7 +27,7 @@ pub async fn auth_comm(addr: &str) -> anyhow::Result<()> {
     tracing::info!("uav auth result: {}", if status { "ok" } else { "fail" });
 
     tracing::debug!("----------------------uav gs communicate----------------------");
-    communicate(stream).await?;
+    communicate(stream, anonym_rx, param_tx).await?;
     tracing::debug!("----------------------uav gs communicate----------------------");
     Ok(())
 }
@@ -126,7 +129,11 @@ async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
     Ok(status == 0)
 }
 
-async fn communicate(stream: TcpStream) -> anyhow::Result<()> {
+async fn communicate(
+    stream: TcpStream,
+    mut anonym_rx: UnboundedReceiver<Vec<String>>,
+    param_tx: UnboundedSender<(Vec<u8>, Vec<String>)>,
+) -> anyhow::Result<()> {
     let mut framed = Framed::new(stream, UavGsCommunicateCodec);
     framed
         .send(UavGsCommunicateRequest::new_communicate_message(vec![]))
@@ -173,18 +180,18 @@ async fn communicate(stream: TcpStream) -> anyhow::Result<()> {
     let aes = aes_gcm::Aes256Gcm::new(key);
     let nonce = Nonce::from_slice(&key[..12]);
 
-    tracing::debug!("key: {}", hex::encode(key));
+    tracing::debug!("key   : {}", hex::encode(key));
 
     let (mut outgoing, incoming) = framed.split();
 
-    let input = "hello".as_bytes();
     let sender = async {
         loop {
-            let output = aes.encrypt(nonce, input).unwrap();
-            let _ = outgoing
-                .send(UavGsCommunicateRequest::new_communicate_message(output))
-                .await;
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            let msg = tokio::select! {
+                Some(ruid) = anonym_rx.next() => {
+                    UavGsCommunicateRequest::new_need_communicate_ruid_list(ruid)
+                }
+            };
+            let _ = outgoing.send(msg).await;
         }
     };
     let receiver = incoming.for_each(|res| async {
@@ -196,9 +203,20 @@ async fn communicate(stream: TcpStream) -> anyhow::Result<()> {
                     tracing::debug!("message: {}", String::from_utf8_lossy(&output));
                 }
                 Some(uav_gs_communicate_response::Response::AlreadyAuthenticatedRuidList(list)) => {
-                    tracing::debug!("online uav: {:?}", list);
+                    tracing::debug!("{:?}", list);
+
+                    // insert into uav ruid list
+                    UAV_RUID_LIST.insert(
+                        list.ruid.clone(),
+                        crate::UavRuid {
+                            ruid: list.ruid,
+                            ip_addr: list.ip_addr,
+                        },
+                    );
                 }
-                Some(_) => {}
+                Some(uav_gs_communicate_response::Response::UavCommunicateParam(param)) => {
+                    let _ = param_tx.unbounded_send((param.ssk.to_vec(), param.c));
+                }
                 _ => {}
             }
         }
