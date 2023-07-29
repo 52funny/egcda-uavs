@@ -5,14 +5,21 @@ mod uav_reg;
 use crate::uav_reg::register;
 use clap::Parser;
 use dashmap::DashMap;
-use futures::StreamExt;
+use futures::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
+use pb::communicate_uav_uav::{uav_uav_communicate_request, UavUavCommunicateRequest};
 use puf::Puf;
 use rug::Integer;
 use std::io::stdin;
+use std::net::SocketAddr;
+use tokio::net::TcpStream;
 use tokio::sync::OnceCell;
+use tokio_util::codec::Framed;
 use tracing_subscriber::EnvFilter;
 
+use self::codec::uav_uav_communicate_codec::{
+    UavUavCommunicateClientCodec, UavUavCommunicateServerCodec,
+};
 use self::uav_auth_comm::auth_comm;
 
 #[derive(Debug, Parser)]
@@ -75,6 +82,8 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    tokio::spawn(receive_uav_message_tcp());
+
     let mut param_rx = param_rx;
     loop {
         println!("please input uav index:");
@@ -92,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         tracing::info!("uav_ruid: {:?}", uav_ruid);
-        anonym_tx.unbounded_send(uav_ruid).unwrap();
+        anonym_tx.unbounded_send(uav_ruid.clone()).unwrap();
 
         let (ssk, c_list) = param_rx.next().await.unwrap();
         tracing::info!("ssk    : {}", hex::encode(&ssk));
@@ -102,9 +111,70 @@ async fn main() -> anyhow::Result<()> {
         let r = PUF.calculate(c).await?;
         let n = Integer::from_digits(&hex::decode(r)?, rug::integer::Order::MsfBe).next_prime();
         let ssk = Integer::from_digits(&ssk, rug::integer::Order::MsfBe);
-        let kd = ssk % &n;
+        let kd = ssk.clone() % &n;
         tracing::info!("kd     : {}", kd.to_string_radix(16));
+        let kd_bytes = kd.to_digits::<u8>(rug::integer::Order::MsfBe);
+
+        let ssk_bytes = ssk.to_digits::<u8>(rug::integer::Order::MsfBe);
+
+        let other_ruid = uav_ruid.last().unwrap();
+        let other_c = c_list.last().unwrap();
+
+        let other_addr = UAV_RUID_LIST.get(other_ruid).unwrap().ip_addr.clone() + ":8092";
+        send_uav_message_tcp(&other_addr, kd_bytes, other_c.to_owned(), ssk_bytes).await?;
     }
 
+    Ok(())
+}
+
+async fn send_uav_message_tcp(
+    addr: &str,
+    kd: Vec<u8>,
+    c: String,
+    ssk: Vec<u8>,
+) -> anyhow::Result<()> {
+    let stream = TcpStream::connect(addr).await?;
+    let mut framed = Framed::new(stream, UavUavCommunicateClientCodec);
+    // fake encrypted data
+    let data = vec![];
+    framed
+        .send(UavUavCommunicateRequest::new_uav_uav_communicate_prev_message(data, c, ssk))
+        .await?;
+    Ok(())
+}
+
+async fn receive_uav_message_tcp() -> anyhow::Result<()> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:8092").await?;
+    loop {
+        let (socket, _addr) = listener.accept().await?;
+        tokio::spawn(async move {
+            let res = receive_uav_message(socket, _addr).await;
+            match res {
+                Ok(_) => {}
+                Err(e) => tracing::error!("receive uav message failed: {:?}", e),
+            }
+        });
+    }
+}
+
+async fn receive_uav_message(stream: TcpStream, _addr: SocketAddr) -> anyhow::Result<()> {
+    let mut framed = Framed::new(stream, UavUavCommunicateServerCodec);
+    let prev = if let Some(Ok(res)) = framed.next().await {
+        if let Some(uav_uav_communicate_request::Request::UavUavCommunicatePrevMessage(prev_msg)) =
+            res.request
+        {
+            prev_msg
+        } else {
+            anyhow::bail!("receive uav uav message failed");
+        }
+    } else {
+        anyhow::bail!("receive uav uav message prev failed");
+    };
+    tracing::debug!("prev: {:?}", prev);
+    let ssk = Integer::from_digits(&prev.ssk, rug::integer::Order::MsfBe);
+    let r = PUF.calculate(&prev.c).await?;
+    let n = Integer::from_digits(&hex::decode(r)?, rug::integer::Order::MsfBe).next_prime();
+    let kd = ssk % &n;
+    tracing::info!("kd   : {}", kd.to_string_radix(16));
     Ok(())
 }
