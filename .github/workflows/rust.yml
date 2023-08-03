@@ -1,0 +1,109 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  clippy-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out mcore repo
+      uses: actions/checkout@v3
+      with:
+        repository: miracl/core
+        path: ./core
+
+    - name: Setup miracl core
+      run: |
+        cd core/rust
+        echo -e "1\n28\n42\n0\n" | python3 config64.py
+        cp -r mcore ../../
+        cd ../../
+        echo -e "[features]\nstd=[]" >> mcore/Cargo.toml
+
+    - uses: actions/checkout@v3
+      with:
+        path: ./uav-schema
+    
+    - name: Install Protoc
+      uses: arduino/setup-protoc@v2
+
+    - name: clippy
+      run: cd uav-schema && cargo clippy --verbose
+    - name: Run tests
+      run: cd uav-schema && cargo test --verbose
+
+  build-uav:
+
+    name: Build uav on aarch64
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out mcore repo
+      uses: actions/checkout@v3
+      with:
+        repository: miracl/core
+        path: ./core
+
+    - name: Setup miracl core
+      run: |
+        cd core/rust
+        echo -e "1\n28\n42\n0\n" | python3 config64.py
+        cp -r mcore ../../
+        cd ../../
+        echo -e "[features]\nstd=[]" >> mcore/Cargo.toml
+
+    - uses: actions/checkout@v3
+      with:
+        path: ./uav-schema
+    - name: Install Protoc
+      uses: arduino/setup-protoc@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: aarch64-unknown-linux-gnu
+        overide: true
+    - uses: actions-rs/cargo@v1
+      with:
+        use-cross: true
+        command: build
+        args: -p uav --manifest-path ./uav-schema/Cargo.toml --release --target aarch64-unknown-linux-gnu
+
+  build-ta-gs:
+    name: Build TA and GS on x86_64
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out mcore repo
+      uses: actions/checkout@v3
+      with:
+        repository: miracl/core
+        path: ./core
+
+    - name: Setup miracl core
+      run: |
+        cd core/rust
+        echo -e "1\n28\n42\n0\n" | python3 config64.py
+        cp -r mcore ../../
+        cd ../../
+        echo -e "[features]\nstd=[]" >> mcore/Cargo.toml
+
+    - uses: actions/checkout@v3
+      with:
+        path: ./uav-schema
+    - name: Install Protoc
+      uses: arduino/setup-protoc@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: x86_64-unknown-linux-gnu
+        overide: true
+    - uses: actions-rs/cargo@v1
+      with:
+        use-cross: true
+        command: build
+        args: -p gs -p ta --manifest-path ./uav-schema/Cargo.toml --release --target x86_64-unknown-linux-gnu
+
