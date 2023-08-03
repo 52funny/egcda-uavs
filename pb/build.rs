@@ -1,6 +1,10 @@
 use std::io::Result;
 
 fn main() -> Result<()> {
+    if std::env::vars().any(|(k, _)| k == "GITHUB_ACTIONS") {
+        println!("github actions");
+        return Ok(());
+    };
     let mut config = prost_build::Config::new();
     config.bytes(["."]);
     config.out_dir("src/");

@@ -129,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn send_uav_message_tcp(
     addr: &str,
-    kd: Vec<u8>,
+    _kd: Vec<u8>,
     c: String,
     ssk: Vec<u8>,
 ) -> anyhow::Result<()> {
