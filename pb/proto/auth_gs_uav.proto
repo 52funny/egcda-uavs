@@ -23,9 +23,8 @@ message UavAuthGsPublicParamMessage {
 message UavAuthPhase1Message {
     int64 t_u = 1;
     bytes tuid_i = 2;
-    bytes r_u = 3;
-    bytes v_i = 4;
-    bytes gamma_i = 5;
+    bytes v_i = 3;
+    bytes gamma_i = 4;
 }
 
 // When the GS receives the UavAuthPhase1Message

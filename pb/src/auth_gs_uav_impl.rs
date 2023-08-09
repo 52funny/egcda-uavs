@@ -13,7 +13,6 @@ impl UavAuthRequest {
     pub fn new_uav_auth_phase1_message(
         t_u: i64,
         tuid_i: Vec<u8>,
-        r_u: Vec<u8>,
         v_i: Vec<u8>,
         gamma_i: Vec<u8>,
     ) -> Self {
@@ -21,7 +20,6 @@ impl UavAuthRequest {
             request: Some(Request::UavAuthPhase1(UavAuthPhase1Message {
                 t_u,
                 tuid_i: tuid_i.into(),
-                r_u: r_u.into(),
                 v_i: v_i.into(),
                 gamma_i: gamma_i.into(),
             })),

@@ -316,46 +316,49 @@ async fn uav_auth_phase(
     let p = ECP::generator();
     let q = ECP2::generator();
 
-    let mut hash_content = uav_info.r.clone();
-    hash_content.extend_from_slice(&phase.r_u);
-    let sigma_i = p.mul(&BIG::frombytes(&hex::decode(sha256::digest(
+    // lambda_i
+    let mut hash_content = phase.t_u.to_be_bytes().to_vec();
+    hash_content.extend_from_slice(&uav_info.r);
+    let lambda_i = p.mul(&BIG::frombytes(&hex::decode(sha256::digest(
         &hash_content,
     ))?));
 
     let mut gamma_i = ECP::frombytes(&phase.gamma_i);
-    gamma_i.add(&sigma_i);
+    gamma_i.add(&lambda_i);
 
-    let psi_i = pair::ate(&q, &gamma_i);
-    let psi_i = pair::fexp(&psi_i);
+    let phi_i = pair::ate(&q, &gamma_i);
+    let phi_i = pair::fexp(&phi_i);
 
-    let delta_i = pair::ate(
-        &q.mul(&BIG::frombytes(&phase.v_i))
-            .mul(&BIG::frombytes(&phase.r_u)),
-        &p.mul(&GS_CONFIG.sk_gs),
-    );
-    let delta_i = pair::fexp(&delta_i);
-
-    let mut hash_content = phase.tuid_i.to_vec();
-    hash_content.extend_from_slice(&phase.t_u.to_be_bytes());
-    hash_content.extend_from_slice(&phase.r_u);
-
-    let tmp_hash = hex::decode(sha256::digest(&hash_content));
-    let mu_i = pair::ate(
-        &q.mul(&BIG::frombytes(&uav_info.r)),
-        &p.mul(&BIG::frombytes(&tmp_hash?)),
-    );
-    let mu_i = pair::fexp(&mu_i);
-
+    // omega_i
     let mut hash_content = id_gs;
     hash_content.extend_from_slice(&random_gs);
-    let exponent1 = BIG::frombytes(&hex::decode(sha256::digest(&hash_content))?);
+    let tmp_hash = hex::decode(sha256::digest(&hash_content))?;
+
+    let omega_i = pair::ate(
+        &q.mul(&BIG::frombytes(&phase.v_i))
+            .mul(&BIG::frombytes(&uav_info.r)),
+        &p.mul(&BIG::frombytes(&tmp_hash)),
+    );
+    let omega_i = pair::fexp(&omega_i);
+
+    // alpha_i
+    let mut hash_content = phase.tuid_i.to_vec();
+    hash_content.extend_from_slice(&phase.t_u.to_be_bytes());
+    let tmp_hash = hex::decode(sha256::digest(&hash_content))?;
+    let alpha_i = pair::ate(
+        &q.mul(&BIG::frombytes(&uav_info.r)),
+        &p.mul(&BIG::frombytes(&tmp_hash)),
+    );
+    let alpha_i = pair::fexp(&alpha_i);
+
+    let exponent1 = GS_CONFIG.sk_gs;
     let exponent2 = BIG::frombytes(&r_gs);
 
     // verify that the equations are equal
-    let mut p1 = psi_i;
-    p1.mul(&delta_i.pow(&exponent1));
+    let mut p1 = phi_i;
+    p1.mul(&omega_i.pow(&exponent1));
 
-    let p2 = mu_i;
+    let p2 = alpha_i;
     let p2 = p2.pow(&exponent2);
 
     let status = if p1.equals(&p2) { 0 } else { 1 };

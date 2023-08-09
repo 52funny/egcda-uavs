@@ -156,7 +156,6 @@ pub async fn auth(addr: &str) -> anyhow::Result<()> {
                 for (idx, item) in UAV_LIST.0.iter().enumerate() {
                     tracing::debug!("uav{}: {}", idx + 1, item.value());
                 }
-                tracing::info!("fake prime: {:?}", UAV_FAKE_PRIME.lock().await);
             } else {
                 anyhow::bail!("get uav list failed");
             }

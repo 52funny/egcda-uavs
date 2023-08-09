@@ -10,7 +10,6 @@ use mcore::bn254::big::BIG;
 use mcore::bn254::ecp::ECP;
 use pb::auth_gs_uav::{uav_auth_response, UavAuthRequest};
 use pb::communicate_gs_uav::{uav_gs_communicate_response, UavGsCommunicateRequest};
-use rand::Rng;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
@@ -59,39 +58,45 @@ async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
 
     // start auth phase1
     let t_u = chrono::Utc::now().timestamp();
-    let r_u_bytes = rand::thread_rng().gen::<[u8; 32]>();
+    // let r_u_bytes = rand::thread_rng().gen::<[u8; 32]>();
     let r_i_bytes = hex::decode(PUF.calculate(hex::encode(&param.c)).await?)?;
 
+    // TUID_i
     let mut hash_content = UAV.get().unwrap().uid.clone();
     hash_content.extend_from_slice(&t_u.to_be_bytes());
-    hash_content.extend_from_slice(&r_u_bytes);
+    hash_content.extend_from_slice(&r_i_bytes);
     let tuid = hex::decode(sha256::digest(&hash_content))?;
 
-    let mut hash_content = tuid.clone();
-    hash_content.extend_from_slice(&param.id_gs);
+    // pho_i
+    let mut hash_content = t_u.to_be_bytes().to_vec();
+    hash_content.extend_from_slice(&r_i_bytes);
+    let pho_i = hex::decode(sha256::digest(&hash_content))?;
+
+    // v_i
+    let mut hash_content = vec![];
     hash_content.extend_from_slice(&t_u.to_be_bytes());
-    hash_content.extend_from_slice(&r_u_bytes);
+    hash_content.extend_from_slice(&tuid);
+    hash_content.extend_from_slice(&param.id_gs);
+    hash_content.extend_from_slice(&pho_i);
     let v_i_bytes = hex::decode(sha256::digest(&hash_content))?;
 
+    // gamma_i
     let p = bn254::ecp::ECP::generator();
     let mut hash_content = tuid.clone();
     hash_content.extend_from_slice(&t_u.to_be_bytes());
-    hash_content.extend_from_slice(&r_u_bytes);
-    let tmp_hash1 = hex::decode(sha256::digest(&hash_content))?;
+    let tmp_hash = hex::decode(sha256::digest(&hash_content))?;
+
     let gamma_first = p
-        .mul(&BIG::frombytes(&tmp_hash1))
+        .mul(&BIG::frombytes(&tmp_hash))
         .mul(&BIG::frombytes(&r_i_bytes))
         .mul(&BIG::frombytes(&param.r_gs));
 
-    let mut hash_content = r_i_bytes;
-    hash_content.extend_from_slice(&r_u_bytes);
-    let tmp_hash2 = hex::decode(sha256::digest(&hash_content))?;
-
-    let gamma_second = p.mul(&BIG::frombytes(&tmp_hash2));
+    let gamma_second = p.mul(&BIG::frombytes(&pho_i));
 
     let gamma_third = ECP::frombytes(&param.q_gs)
         .mul(&BIG::frombytes(&v_i_bytes))
-        .mul(&BIG::frombytes(&r_u_bytes));
+        .mul(&BIG::frombytes(&r_i_bytes));
+
     let mut gamma = gamma_first;
     gamma.sub(&gamma_second);
     gamma.sub(&gamma_third);
@@ -100,7 +105,6 @@ async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
 
     tracing::debug!("t_u     : {}", t_u);
     tracing::debug!("tuid    : {}", hex::encode(&tuid));
-    tracing::debug!("r_u     : {}", hex::encode(r_u_bytes));
     tracing::debug!("v_i     : {}", hex::encode(&v_i_bytes));
     tracing::debug!("gamma_i : {}", hex::encode(&gamma_i_bytes));
 
@@ -108,7 +112,6 @@ async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
         .send(UavAuthRequest::new_uav_auth_phase1_message(
             t_u,
             tuid,
-            r_u_bytes.to_vec(),
             v_i_bytes,
             gamma_i_bytes,
         ))

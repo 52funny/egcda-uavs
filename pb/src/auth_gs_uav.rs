@@ -35,10 +35,8 @@ pub struct UavAuthPhase1Message {
     #[prost(bytes = "bytes", tag = "2")]
     pub tuid_i: ::prost::bytes::Bytes,
     #[prost(bytes = "bytes", tag = "3")]
-    pub r_u: ::prost::bytes::Bytes,
-    #[prost(bytes = "bytes", tag = "4")]
     pub v_i: ::prost::bytes::Bytes,
-    #[prost(bytes = "bytes", tag = "5")]
+    #[prost(bytes = "bytes", tag = "4")]
     pub gamma_i: ::prost::bytes::Bytes,
 }
 /// When the GS receives the UavAuthPhase1Message
