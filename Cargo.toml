@@ -1,9 +1,4 @@
 [workspace]
+resolver = "2"
 
-members = [
-    "pb",
-    "ta",
-    "gs",
-    "uav",
-]
-
+members = ["pb", "ta", "gs", "uav"]

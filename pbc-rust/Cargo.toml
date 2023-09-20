@@ -1,0 +1,17 @@
+[package]
+name = "pbc-rust"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hex = "0.4.3"
+
+
+[dev-dependencies]
+rand = "0.8.5"
+
+[build-dependencies]
+bindgen = { version = "0.66.1", features = ["experimental"] }
+cc = "1.0.83"

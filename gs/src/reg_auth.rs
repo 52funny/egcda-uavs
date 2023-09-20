@@ -1,11 +1,7 @@
-use crate::{codec, UavList, GS_CONFIG, UAV_FAKE_PRIME, UAV_LIST};
+use crate::{codec, UavList, GENERATION, GS_CONFIG, P, UAV_FAKE_PRIME, UAV_LIST};
 use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit, Nonce};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use mcore::bn254::big::BIG;
-use mcore::bn254::ecp::ECP;
-use mcore::bn254::ecp2::ECP2;
-use mcore::bn254::pair;
 use pb::auth_ta_gs::gs_auth_response::Response;
 use rand::Rng;
 use rug::Integer;
@@ -72,17 +68,26 @@ pub async fn auth(addr: &str) -> anyhow::Result<()> {
     let hash_str = sha256::digest(gid + &t.to_string());
     // 32 byte
     let hash_bytes = hex::decode(&hash_str)?;
-    let hash = BIG::frombytes(&hash_bytes);
-    let puk_ta = ECP::frombytes(unsafe { puk_ta_bytes.assume_init_ref() });
-    let p = puk_ta.mul(&hash);
-    let q = ECP2::generator();
-    let fp = pair::ate(&q, &p);
-    let fp = pair::fexp(&fp);
-    let mut fp = fp.pow(&GS_CONFIG.sk_gs);
-    // let mut fp = pair::fexp(&fp);
+    let mut hash = P.gr();
+    hash.from_bytes(hash_bytes);
+    tracing::debug!("tau: {:?}", hash);
 
-    let mut sig = vec![0u8; 32 * 2 * 6];
-    fp.tobytes(&mut sig);
+    let mut puk_ta = P.g1();
+    puk_ta.from_bytes(unsafe { puk_ta_bytes.assume_init_ref() });
+
+    let mut puk_ta_clone = puk_ta.clone();
+    puk_ta_clone.mul_element_zn(hash.clone());
+
+    let mut q = P.g1();
+    q.from_bytes(GENERATION);
+
+    let mut fp = P.pairing(&puk_ta_clone, &q);
+
+    let mut sk_gs = P.gr();
+    sk_gs.from_bytes(&GS_CONFIG.sk_gs_bytes);
+    fp.pow_zn(&sk_gs);
+
+    let sig = fp.as_bytes();
     tracing::debug!("sig: {}", hex::encode(&sig));
     frame
         .send(pb::auth_ta_gs::GsAuthRequest::new_gs_auth_phase1_message(
@@ -112,13 +117,16 @@ pub async fn auth(addr: &str) -> anyhow::Result<()> {
             if let Some(Response::UavList(uav_list)) = res.response {
                 let uav_list_enc = uav_list.uav_list_enc.to_vec();
 
-                // construct ssk_tags
-                let ssk_tags = puk_ta.mul(&GS_CONFIG.sk_gs).mul(&hash);
-                let mut ssk_tags_bytes = vec![0u8; 65];
-                ssk_tags.tobytes(&mut ssk_tags_bytes, false);
+                let mut ssk_tags = puk_ta.clone();
+                ssk_tags.mul_element_zn(sk_gs);
+                ssk_tags.mul_element_zn(hash);
+
+                // let mut ssk_tags_bytes = vec![0u8; 65];
+                // ssk_tags.tobytes(&mut ssk_tags_bytes, false);
+                let ssk_tags_bytes = ssk_tags.as_bytes();
                 let ssk_tags_bytes_sha2 = hex::decode(sha256::digest(&ssk_tags_bytes))?;
 
-                tracing::info!("ssk_tags: {}", ssk_tags);
+                tracing::info!("ssk_tags: {}", hex::encode(ssk_tags_bytes));
 
                 let key = Key::<Aes256Gcm>::from_slice(&ssk_tags_bytes_sha2);
                 let nonce = Nonce::from_slice(&ssk_tags_bytes_sha2[..12]);

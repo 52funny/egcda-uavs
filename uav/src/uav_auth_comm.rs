@@ -1,13 +1,10 @@
 use crate::codec::uav_auth_codec::UavAuthCodec;
 use crate::codec::uav_communicate_codec::UavGsCommunicateCodec;
-use crate::{PUF, UAV, UAV_RUID_LIST};
+use crate::{GENERATION, P, PUF, UAV, UAV_RUID_LIST};
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::{SinkExt, StreamExt};
-use mcore::bn254;
-use mcore::bn254::big::BIG;
-use mcore::bn254::ecp::ECP;
 use pb::auth_gs_uav::{uav_auth_response, UavAuthRequest};
 use pb::communicate_gs_uav::{uav_gs_communicate_response, UavGsCommunicateRequest};
 use tokio::net::TcpStream;
@@ -32,6 +29,7 @@ pub async fn auth_comm(
 }
 
 async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
+    let t = std::time::Instant::now();
     let mut framed = Framed::new(stream, UavAuthCodec);
     let ruid = UAV.get().unwrap().ruid.clone();
     let _uid = UAV.get().unwrap().uid.clone();
@@ -53,8 +51,6 @@ async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
     tracing::debug!("id_gs   : {}", hex::encode(&param.id_gs));
     tracing::debug!("r_gs    : {}", hex::encode(&param.r_gs));
     tracing::debug!("q_gs    : {}", hex::encode(&param.q_gs));
-
-    let t = std::time::Instant::now();
 
     // start auth phase1
     let t_u = chrono::Utc::now().timestamp();
@@ -81,32 +77,45 @@ async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
     let v_i_bytes = hex::decode(sha256::digest(&hash_content))?;
 
     // gamma_i
-    let p = bn254::ecp::ECP::generator();
-    let mut hash_content = tuid.clone();
-    hash_content.extend_from_slice(&t_u.to_be_bytes());
-    let tmp_hash = hex::decode(sha256::digest(&hash_content))?;
+    let mut p = P.g1();
+    p.from_bytes(GENERATION);
 
-    let gamma_first = p
-        .mul(&BIG::frombytes(&tmp_hash))
-        .mul(&BIG::frombytes(&r_i_bytes))
-        .mul(&BIG::frombytes(&param.r_gs));
+    // first part
+    let mut gamma_first = p.clone();
+    let mut gamma_ri = P.gr();
+    gamma_ri.from_bytes(&r_i_bytes);
+    let mut gamma_rgs = P.gr();
+    gamma_rgs.from_bytes(&param.r_gs);
+    gamma_first.mul_element_zn(gamma_ri);
+    gamma_first.mul_element_zn(gamma_rgs);
 
-    let gamma_second = p.mul(&BIG::frombytes(&pho_i));
+    // second part
+    let mut gamma_second = p;
+    let mut gamma_pho_i = P.gr();
+    gamma_pho_i.from_bytes(&pho_i);
+    gamma_second.mul_element_zn(gamma_pho_i);
 
-    let gamma_third = ECP::frombytes(&param.q_gs)
-        .mul(&BIG::frombytes(&v_i_bytes))
-        .mul(&BIG::frombytes(&r_i_bytes));
+    // third part
+    let mut gamma_third = P.g1();
+    gamma_third.from_bytes(&param.q_gs);
+    let mut gamma_nu_i = P.gr();
+    let mut gamma_nu_ri = P.gr();
+    gamma_nu_i.from_bytes(&v_i_bytes);
+    gamma_nu_ri.from_bytes(&r_i_bytes);
+
+    gamma_third.mul_element_zn(gamma_nu_i);
+    gamma_third.mul_element_zn(gamma_nu_ri);
 
     let mut gamma = gamma_first;
-    gamma.sub(&gamma_second);
-    gamma.sub(&gamma_third);
-    let mut gamma_i_bytes = vec![0u8; 65];
-    gamma.tobytes(&mut gamma_i_bytes, false);
+    gamma.sub_element(gamma_second);
+    gamma.sub_element(gamma_third);
+    let gamma_i_bytes = gamma.as_bytes();
 
     tracing::debug!("t_u     : {}", t_u);
     tracing::debug!("tuid    : {}", hex::encode(&tuid));
     tracing::debug!("v_i     : {}", hex::encode(&v_i_bytes));
     tracing::debug!("gamma_i : {}", hex::encode(&gamma_i_bytes));
+    println!("uav calculate params: {:?}", t.elapsed());
 
     framed
         .send(UavAuthRequest::new_uav_auth_phase1_message(

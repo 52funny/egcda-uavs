@@ -29,4 +29,4 @@ dashmap = { version = "5.5.0", features = ["serde"] }
 aes-gcm = "0.10.2"
 serde_json = "1.0.103"
 clap = { version = "4.3.19", features = ["derive"] }
-
+pbc-rust = {path = "../pbc-rust"}

@@ -9,6 +9,7 @@ fn main() -> Result<()> {
     config.bytes(["."]);
     config.out_dir("src/");
     config.type_attribute(".", "#[derive(PartialOrd)]");
+
     walkdir::WalkDir::new("./proto")
         .into_iter()
         .filter_map(|e| e.ok())

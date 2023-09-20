@@ -6,8 +6,10 @@ use crate::uav_reg::register;
 use clap::Parser;
 use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
+use hex_literal::hex;
 use lazy_static::lazy_static;
 use pb::communicate_uav_uav::{uav_uav_communicate_request, UavUavCommunicateRequest};
+use pbc_rust::Pairing;
 use puf::Puf;
 use rug::Integer;
 use std::io::stdin;
@@ -26,6 +28,14 @@ use self::uav_auth_comm::auth_comm;
 struct CliArgs {
     #[arg(short, long)]
     pub register: bool,
+
+    #[arg(short, long)]
+    /// TA server address
+    pub ta: String,
+
+    #[arg(short, long)]
+    /// GS server address
+    pub gs: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -43,8 +53,23 @@ pub struct UavRuid {
 lazy_static! {
     static ref PUF: Puf = Puf::new(([127, 0, 0, 1], 12345));
     static ref UAV_RUID_LIST: DashMap<String, UavRuid> = DashMap::new();
+    static ref P: Pairing = Pairing::new(TYPE_A);
 }
+
 static UAV: OnceCell<Uav> = OnceCell::const_new();
+
+const TYPE_A: &str = "
+type a
+q 6269501190990595151250674934240647994559640542560528061719627332415708950243708672053776563123743544851675214786949400131452747984830937087887946632632599
+h 8579533584978239287913221933865556817094441585921961055557100258639027708646644638908786275391553267066600
+r 730750818665452757176057050065048642452048576511
+exp2 159
+exp1 110
+sign1 1
+sign0 -1
+";
+
+const GENERATION: [u8; 128] = hex!("221e95f6082142d33b1f78bc467bc3d16b8bfff7f1847a481b36b3581aa546798773b20edf1fac46d4f200c5c6296151bd3e835e1325b5bfb474d1c9257314113b1e1201243c6c8257f34a6a24c351ad4968ec9c9c1b3ec1bf23108f643c1a42ebb7137a5a255c845149f76535585a39ef5f96830a10556478ee066a4db57676");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -52,12 +77,14 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("debug".parse().unwrap()))
         .init();
+    // init pairing
+    P.g1();
     let args = CliArgs::parse();
-    let ta_addr = "127.0.0.1:8090";
-    let gs_addr = "127.0.0.1:8091";
+    let ta_addr = args.ta.clone();
+    let gs_addr = args.gs.clone();
 
     if args.register {
-        let _uav = register(ta_addr).await?;
+        let _uav = register(&ta_addr).await?;
         tracing::debug!("uav: {:?}", UAV.get());
         let f = std::fs::File::create("uav.json")?;
         serde_json::to_writer(f, &_uav)?;
@@ -74,8 +101,8 @@ async fn main() -> anyhow::Result<()> {
 
     // insert uav ruid and uid to local database
     UAV.get_or_init(|| futures::future::ready(uav)).await;
-    tokio::spawn(async {
-        let res = auth_comm(gs_addr, anonym_rx, param_tx).await;
+    tokio::spawn(async move {
+        let res = auth_comm(&gs_addr, anonym_rx, param_tx).await;
         match res {
             Ok(_) => {}
             Err(e) => tracing::error!("auth failed: {:?}", e),

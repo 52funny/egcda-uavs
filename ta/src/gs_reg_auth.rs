@@ -1,19 +1,19 @@
 use crate::codec::gs_auth_codec::GsAuthCodec;
 use crate::codec::gs_register_codec::GsRegisterCodec;
-use crate::GsInfo;
+use crate::{GsInfo, GENERATION, P};
 use crate::{GS_LIST, TA_CONFIG, UAV_LIST};
 use aes_gcm::{aead::Aead, Aes256Gcm, Key, KeyInit, Nonce};
 use futures::{SinkExt, StreamExt};
 use hex::ToHex;
-use mcore::bn254::ecp::ECP;
-use mcore::bn254::fp12::FP12;
-use mcore::bn254::pair;
-use mcore::bn254::{big::BIG, ecp2::ECP2};
 use pb::auth_ta_gs::gs_auth_request;
 use pb::auth_ta_gs::GsAuthResponse;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
+
+// lazy_static! {
+//     static ref PAIRING: Pairing = Pairing::new(TYPE_A);
+// }
 
 pub async fn gs_register(stream: TcpStream, _addr: SocketAddr) -> anyhow::Result<()> {
     let ip_addr = _addr.ip();
@@ -87,21 +87,36 @@ pub async fn gs_auth(stream: TcpStream, _addr: SocketAddr) -> anyhow::Result<()>
             }
 
             let hash_bytes = hex::decode(hash_str).unwrap();
-            let hash_ = BIG::frombytes(&hash_bytes);
-            let q = ECP2::generator().mul(&hash_);
-            let puk_gs = ECP::frombytes(&param.puk_gs);
+
+            let mut hash_ = P.gr();
+            hash_.from_bytes(&hash_bytes);
+
+            tracing::debug!("tau: {:?}", hash_);
+            let mut q = P.g2();
+            q.from_bytes(GENERATION);
+            q.mul_element_zn(hash_.clone());
+
+            // let q = P.g2() * hash_.clone();
+
+            let mut puk_gs = P.g1();
+            puk_gs.from_bytes(&param.puk_gs);
 
             let t2 = std::time::Instant::now();
             // compute ta signature
-            let sig_ = pair::ate(&q, &puk_gs);
-            let sig_ = pair::fexp(&sig_);
-            let sig_ = sig_.pow(&TA_CONFIG.sk_ta);
+            //
+            let mut sig_ = P.pairing(&puk_gs, &q);
 
-            // convert bytes to fp12
-            let sig = FP12::frombytes(&param.signature);
+            let mut sk_ta = P.gr();
+            sk_ta.from_bytes(&TA_CONFIG.sk_ta_bytes);
+            sig_.pow_zn(&sk_ta);
 
+            let mut sig = P.gt();
+            sig.from_bytes(&param.signature);
+
+            tracing::debug!("sig: {:?}", sig);
+            tracing::debug!("sig_: {:?}", sig_);
             // check signature is valid
-            let status = if sig_.equals(&sig) {
+            let status = if sig_ == sig {
                 tracing::info!("sig equals");
                 0
             } else {
@@ -123,12 +138,16 @@ pub async fn gs_auth(stream: TcpStream, _addr: SocketAddr) -> anyhow::Result<()>
 
     // means gs auth success, then send encryped uav list
     if status == 0 {
-        let ssk_tags = puk_gs.mul(&TA_CONFIG.sk_ta).mul(&hash_);
-        let mut ssk_tags_bytes = vec![0u8; 65];
-        ssk_tags.tobytes(&mut ssk_tags_bytes, false);
+        let mut sk_ta = P.gr();
+        sk_ta.from_bytes(&TA_CONFIG.sk_ta_bytes);
+        let mut ssk_tags = puk_gs;
+        ssk_tags.mul_element_zn(sk_ta);
+        ssk_tags.mul_element_zn(hash_);
+
+        let ssk_tags_bytes = ssk_tags.as_bytes();
         let ssk_tags_bytes_sha2 = hex::decode(sha256::digest(&ssk_tags_bytes))?;
 
-        tracing::debug!("ssk_tags: {}", ssk_tags);
+        tracing::debug!("ssk_tags: {:?}", hex::encode(ssk_tags_bytes));
 
         let key = Key::<Aes256Gcm>::from_slice(&ssk_tags_bytes_sha2);
         let nonce = Nonce::from_slice(&ssk_tags_bytes_sha2[..12]);

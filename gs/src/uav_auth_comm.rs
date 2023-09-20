@@ -1,15 +1,12 @@
 use crate::codec::uav_auth_codec::UavAuthCodec;
 use crate::codec::uav_communicate_codec::UavGsCommunicateCodec;
 use crate::{
-    UavAuthInfo, UavInfo, GS_CONFIG, UAV_AUTH_LIST, UAV_AUTH_LIST_STATE, UAV_FAKE_PRIME, UAV_LIST,
+    UavAuthInfo, UavInfo, GENERATION, GS_CONFIG, P, UAV_AUTH_LIST, UAV_AUTH_LIST_STATE,
+    UAV_FAKE_PRIME, UAV_LIST,
 };
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use futures::{SinkExt, StreamExt};
-use mcore::bn254::big::BIG;
-use mcore::bn254::ecp::ECP;
-use mcore::bn254::ecp2::ECP2;
-use mcore::bn254::pair;
 use pb::auth_gs_uav::uav_auth_request::Request;
 use pb::auth_gs_uav::UavAuthResponse;
 use pb::communicate_gs_uav::{uav_gs_communicate_request, UavGsCommunicateResponse};
@@ -288,11 +285,18 @@ async fn public_param() -> anyhow::Result<(Vec<u8>, i64, Vec<u8>, Vec<u8>, Vec<u
     let mut hash_content = id_gs.clone();
     hash_content.extend_from_slice(&random_gs);
     let q_gs_parts_bytes = hex::decode(sha256::digest(&hash_content))?;
-    let p = mcore::bn254::ecp::ECP::generator();
-    let q_gs_big = mcore::bn254::big::BIG::frombytes(&q_gs_parts_bytes);
-    let p = p.mul(&GS_CONFIG.sk_gs).mul(&q_gs_big);
-    let mut q_gs = vec![0u8; 65];
-    p.tobytes(&mut q_gs, false);
+
+    let mut sk_gs = P.gr();
+    sk_gs.from_bytes(&GS_CONFIG.sk_gs_bytes);
+    let mut q_gs_big = P.gr();
+    q_gs_big.from_bytes(&q_gs_parts_bytes);
+
+    let mut p = P.g1();
+    p.from_bytes(GENERATION);
+    p.mul_element_zn(sk_gs);
+    p.mul_element_zn(q_gs_big);
+
+    let q_gs = p.as_bytes();
     Ok((random_gs.to_vec(), unsafe { T_GS }, id_gs, r_gs, q_gs))
 }
 
@@ -313,55 +317,78 @@ async fn uav_auth_phase(
         anyhow::bail!("framed recv at uav auth phase1 message error");
     };
     let t = std::time::Instant::now();
-    let p = ECP::generator();
-    let q = ECP2::generator();
+    let mut p = P.g1();
+    p.from_bytes(GENERATION);
+    // let p = ECP::generator();
+    let mut q = P.g2();
+    q.from_bytes(GENERATION);
 
     // lambda_i
+    let mut lambda_i = p.clone();
     let mut hash_content = phase.t_u.to_be_bytes().to_vec();
     hash_content.extend_from_slice(&uav_info.r);
-    let lambda_i = p.mul(&BIG::frombytes(&hex::decode(sha256::digest(
-        &hash_content,
-    ))?));
 
-    let mut gamma_i = ECP::frombytes(&phase.gamma_i);
-    gamma_i.add(&lambda_i);
+    let mut lambda_zn = P.gr();
+    lambda_zn.from_bytes(&hex::decode(sha256::digest(&hash_content))?);
+    lambda_i.mul_element_zn(lambda_zn);
 
-    let phi_i = pair::ate(&q, &gamma_i);
-    let phi_i = pair::fexp(&phi_i);
+    let mut gamma_i = P.g1();
+    gamma_i.from_bytes(&phase.gamma_i);
+    // let mut gamma_i = ECP::frombytes(&phase.gamma_i);
+    gamma_i.add_element(lambda_i);
+
+    let phi_i = P.pairing(&gamma_i, &q);
+    // let phi_i = pair::ate(&q, &gamma_i);
+    // let phi_i = pair::fexp(&phi_i);
 
     // omega_i
+    let mut omega_p = P.g1();
+    omega_p.from_bytes(GENERATION);
     let mut hash_content = id_gs;
     hash_content.extend_from_slice(&random_gs);
     let tmp_hash = hex::decode(sha256::digest(&hash_content))?;
+    let mut omega_p_h = P.gr();
+    omega_p_h.from_bytes(tmp_hash);
+    omega_p.mul_element_zn(omega_p_h);
 
-    let omega_i = pair::ate(
-        &q.mul(&BIG::frombytes(&phase.v_i))
-            .mul(&BIG::frombytes(&uav_info.r)),
-        &p.mul(&BIG::frombytes(&tmp_hash)),
-    );
-    let omega_i = pair::fexp(&omega_i);
+    let mut omega_q = P.g2();
+    omega_q.from_bytes(GENERATION);
+    let mut omega_q_vi = P.gr();
+    let mut omega_q_ri = P.gr();
+    omega_q_vi.from_bytes(&phase.v_i);
+    omega_q_ri.from_bytes(&uav_info.r);
+
+    omega_q.mul_element_zn(omega_q_vi);
+    omega_q.mul_element_zn(omega_q_ri);
+
+    let mut omega_i = P.pairing(&omega_p, &omega_q);
 
     // alpha_i
-    let mut hash_content = phase.tuid_i.to_vec();
-    hash_content.extend_from_slice(&phase.t_u.to_be_bytes());
-    let tmp_hash = hex::decode(sha256::digest(&hash_content))?;
-    let alpha_i = pair::ate(
-        &q.mul(&BIG::frombytes(&uav_info.r)),
-        &p.mul(&BIG::frombytes(&tmp_hash)),
-    );
-    let alpha_i = pair::fexp(&alpha_i);
+    let mut alpha_p = P.g1();
+    let mut alpha_q = P.g2();
+    let mut alpha_q_ri = P.gr();
+    alpha_p.from_bytes(GENERATION);
+    alpha_q.from_bytes(GENERATION);
+    alpha_q_ri.from_bytes(&uav_info.r);
 
-    let exponent1 = GS_CONFIG.sk_gs;
-    let exponent2 = BIG::frombytes(&r_gs);
+    alpha_q.mul_element_zn(alpha_q_ri);
+
+    let mut alpha_i = P.pairing(&alpha_p, &alpha_q);
+
+    let mut exponent1 = P.gr();
+    let mut exponent2 = P.gr();
+    exponent1.from_bytes(&GS_CONFIG.sk_gs_bytes);
+    exponent2.from_bytes(&r_gs);
 
     // verify that the equations are equal
-    let mut p1 = phi_i;
-    p1.mul(&omega_i.pow(&exponent1));
+    omega_i.pow_zn(&exponent1);
+    alpha_i.pow_zn(&exponent2);
 
+    let mut p1 = phi_i.clone();
+    p1.mul_element(omega_i);
     let p2 = alpha_i;
-    let p2 = p2.pow(&exponent2);
 
-    let status = if p1.equals(&p2) { 0 } else { 1 };
+    let status = if p1 == p2 { 0 } else { 1 };
 
     tracing::info!("spend time: {:?}", t.elapsed());
     // send status to uav

@@ -14,10 +14,12 @@ impl Puf {
         Self { addr: addr.into() }
     }
     pub async fn calculate(&self, c: impl AsRef<[u8]>) -> anyhow::Result<String> {
+        let t = std::time::Instant::now();
         let mut stream = TcpStream::connect(self.addr).await?;
         stream.write_all(c.as_ref()).await?;
         let mut v = Vec::new();
         stream.read_to_end(&mut v).await?;
+        tracing::info!("puf calculate time: {:?}", t.elapsed());
         Ok(unsafe { String::from_utf8_unchecked(v) })
     }
 }
