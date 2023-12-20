@@ -12,6 +12,8 @@ use pb::communicate_uav_uav::{uav_uav_communicate_request, UavUavCommunicateRequ
 use pbc_rust::Pairing;
 use puf::Puf;
 use rug::Integer;
+use serde::de::{self, Unexpected, Visitor};
+use serde::ser::SerializeStruct;
 use std::io::stdin;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
@@ -38,10 +40,121 @@ struct CliArgs {
     pub gs: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Uav {
     pub uid: Vec<u8>,
     pub ruid: Vec<u8>,
+}
+
+impl serde::Serialize for Uav {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut uav = serializer.serialize_struct("Uav", 2)?;
+        uav.serialize_field("uid", &hex::encode(&self.uid))?;
+        uav.serialize_field("ruid", &hex::encode(&self.ruid))?;
+        uav.end()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Uav {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &["uid", "ruid"];
+        #[allow(non_camel_case_types)]
+        enum Field {
+            uid,
+            ruid,
+        }
+        impl<'de> serde::Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct FieldVisitor;
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        formatter.write_str("`uid` or `ruid`")
+                    }
+                    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                    where
+                        E: de::Error,
+                    {
+                        match v {
+                            "uid" => Ok(Field::uid),
+                            "ruid" => Ok(Field::ruid),
+                            _ => Err(de::Error::unknown_field(v, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct UavVisitor;
+        impl<'de> Visitor<'de> for UavVisitor {
+            type Value = Uav;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("struct Uav")
+            }
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let uid: String = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+
+                let ruid: String = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &self))?;
+                let uid = hex::decode(uid).map_err(|_| {
+                    de::Error::invalid_value(Unexpected::Str("invalid uid str"), &self)
+                })?;
+                let ruid = hex::decode(ruid).map_err(|_| {
+                    de::Error::invalid_value(Unexpected::Str("invalid ruid str"), &self)
+                })?;
+                Ok(Uav { uid, ruid })
+            }
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let mut uid = None;
+                let mut ruid = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::uid => {
+                            if uid.is_some() {
+                                return Err(de::Error::duplicate_field("uid"));
+                            }
+                            let v: String = map.next_value()?;
+                            uid = Some(hex::decode(v).map_err(|_| {
+                                de::Error::invalid_value(Unexpected::Str("invalid uid str"), &self)
+                            })?);
+                        }
+                        Field::ruid => {
+                            if ruid.is_some() {
+                                return Err(de::Error::duplicate_field("ruid"));
+                            }
+                            let v: String = map.next_value()?;
+                            ruid = Some(hex::decode(v).map_err(|_| {
+                                de::Error::invalid_value(Unexpected::Str("invalid ruid str"), &self)
+                            })?);
+                        }
+                    }
+                }
+                let uid = uid.ok_or_else(|| de::Error::missing_field("uid"))?;
+                let ruid = ruid.ok_or_else(|| de::Error::missing_field("uid"))?;
+                Ok(Uav { uid, ruid })
+            }
+        }
+        deserializer.deserialize_struct("Uav", &["uid", "ruid"], UavVisitor)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -77,15 +190,12 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("debug".parse().unwrap()))
         .init();
-    // init pairing
-    P.g1();
     let args = CliArgs::parse();
     let ta_addr = args.ta.clone();
     let gs_addr = args.gs.clone();
 
     if args.register {
         let _uav = register(&ta_addr).await?;
-        tracing::debug!("uav: {:?}", UAV.get());
         let f = std::fs::File::create("uav.json")?;
         serde_json::to_writer(f, &_uav)?;
         return Ok(());
@@ -178,7 +288,9 @@ async fn receive_uav_message_tcp() -> anyhow::Result<()> {
             let res = receive_uav_message(socket, _addr).await;
             match res {
                 Ok(_) => {}
-                Err(e) => tracing::error!("receive uav message failed: {:?}", e),
+                Err(e) => {
+                    tracing::error!("receive uav message failed: {:?}", e)
+                }
             }
         });
     }
