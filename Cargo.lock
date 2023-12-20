@@ -607,7 +607,6 @@ dependencies = [
  "hex",
  "hex-literal",
  "lazy_static",
- "mcore",
  "pb",
  "pbc-rust",
  "prost",
@@ -793,10 +792,6 @@ checksum = "8263075bb86c5a1b1427b5ae862e8889656f126e9f77c484496e8b47cf5c5558"
 dependencies = [
  "regex-automata 0.1.10",
 ]
-
-[[package]]
-name = "mcore"
-version = "0.1.0"
 
 [[package]]
 name = "memchr"
@@ -1374,7 +1369,6 @@ dependencies = [
  "hex",
  "hex-literal",
  "lazy_static",
- "mcore",
  "pb",
  "pbc-rust",
  "prost",
@@ -1551,7 +1545,6 @@ dependencies = [
  "hex",
  "hex-literal",
  "lazy_static",
- "mcore",
  "pb",
  "pbc-rust",
  "prost",

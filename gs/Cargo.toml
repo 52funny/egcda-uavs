@@ -18,7 +18,7 @@ tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 tracing = "0.1.37"
 
 pb = { path = "../pb" }
-mcore = { path = "../../mcore", features = ["std"] }
+# mcore = { path = "../mcore", features = ["std"] }
 anyhow = "1.0.72"
 rand = "0.8.5"
 lazy_static = "1.4.0"
@@ -32,3 +32,4 @@ aes-gcm = "0.10.2"
 serde_json = "1.0.103"
 futures-channel = "0.3.28"
 pbc-rust = {path = "../pbc-rust"}
+
