@@ -779,9 +779,9 @@ pub const __GMP_CC: &[u8; 6] = b"clang\0";
 pub const __GMP_CFLAGS: &[u8; 70] =
     b"-O2 -pedantic -fomit-frame-pointer -m64 -mtune=nehalem -march=nehalem\0";
 pub const __GNU_MP_VERSION: u32 = 6;
-pub const __GNU_MP_VERSION_MINOR: u32 = 2;
-pub const __GNU_MP_VERSION_PATCHLEVEL: u32 = 1;
-pub const __GNU_MP_RELEASE: u32 = 60201;
+pub const __GNU_MP_VERSION_MINOR: u32 = 3;
+pub const __GNU_MP_VERSION_PATCHLEVEL: u32 = 0;
+pub const __GNU_MP_RELEASE: u32 = 60300;
 pub type va_list = __builtin_va_list;
 pub type __gnuc_va_list = __builtin_va_list;
 pub type __int8_t = ::std::os::raw::c_schar;
@@ -12652,6 +12652,8 @@ pub type mpf_srcptr = *const __mpf_struct;
 pub type mpf_ptr = *mut __mpf_struct;
 pub type mpq_srcptr = *const __mpq_struct;
 pub type mpq_ptr = *mut __mpq_struct;
+pub type gmp_randstate_ptr = *mut __gmp_randstate_struct;
+pub type gmp_randstate_srcptr = *const __gmp_randstate_struct;
 extern "C" {
     pub fn __gmp_set_memory_functions(
         arg1: ::std::option::Option<
@@ -12696,14 +12698,14 @@ extern "C" {
     pub static __gmp_version: *const ::std::os::raw::c_char;
 }
 extern "C" {
-    pub fn __gmp_randinit(arg1: *mut __gmp_randstate_struct, arg2: gmp_randalg_t, ...);
+    pub fn __gmp_randinit(arg1: gmp_randstate_ptr, arg2: gmp_randalg_t, ...);
 }
 extern "C" {
-    pub fn __gmp_randinit_default(arg1: *mut __gmp_randstate_struct);
+    pub fn __gmp_randinit_default(arg1: gmp_randstate_ptr);
 }
 extern "C" {
     pub fn __gmp_randinit_lc_2exp(
-        arg1: *mut __gmp_randstate_struct,
+        arg1: gmp_randstate_ptr,
         arg2: mpz_srcptr,
         arg3: ::std::os::raw::c_ulong,
         arg4: mp_bitcnt_t,
@@ -12711,37 +12713,34 @@ extern "C" {
 }
 extern "C" {
     pub fn __gmp_randinit_lc_2exp_size(
-        arg1: *mut __gmp_randstate_struct,
+        arg1: gmp_randstate_ptr,
         arg2: mp_bitcnt_t,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
-    pub fn __gmp_randinit_mt(arg1: *mut __gmp_randstate_struct);
+    pub fn __gmp_randinit_mt(arg1: gmp_randstate_ptr);
 }
 extern "C" {
-    pub fn __gmp_randinit_set(
-        arg1: *mut __gmp_randstate_struct,
-        arg2: *const __gmp_randstate_struct,
-    );
+    pub fn __gmp_randinit_set(arg1: gmp_randstate_ptr, arg2: gmp_randstate_srcptr);
 }
 extern "C" {
-    pub fn __gmp_randseed(arg1: *mut __gmp_randstate_struct, arg2: mpz_srcptr);
+    pub fn __gmp_randseed(arg1: gmp_randstate_ptr, arg2: mpz_srcptr);
 }
 extern "C" {
-    pub fn __gmp_randseed_ui(arg1: *mut __gmp_randstate_struct, arg2: ::std::os::raw::c_ulong);
+    pub fn __gmp_randseed_ui(arg1: gmp_randstate_ptr, arg2: ::std::os::raw::c_ulong);
 }
 extern "C" {
-    pub fn __gmp_randclear(arg1: *mut __gmp_randstate_struct);
+    pub fn __gmp_randclear(arg1: gmp_randstate_ptr);
 }
 extern "C" {
     pub fn __gmp_urandomb_ui(
-        arg1: *mut __gmp_randstate_struct,
+        arg1: gmp_randstate_ptr,
         arg2: ::std::os::raw::c_ulong,
     ) -> ::std::os::raw::c_ulong;
 }
 extern "C" {
     pub fn __gmp_urandomm_ui(
-        arg1: *mut __gmp_randstate_struct,
+        arg1: gmp_randstate_ptr,
         arg2: ::std::os::raw::c_ulong,
     ) -> ::std::os::raw::c_ulong;
 }
@@ -13267,6 +13266,9 @@ extern "C" {
     pub fn __gmpz_nextprime(arg1: mpz_ptr, arg2: mpz_srcptr);
 }
 extern "C" {
+    pub fn __gmpz_prevprime(arg1: mpz_ptr, arg2: mpz_srcptr) -> ::std::os::raw::c_int;
+}
+extern "C" {
     pub fn __gmpz_out_raw(arg1: *mut FILE, arg2: mpz_srcptr) -> usize;
 }
 extern "C" {
@@ -13332,7 +13334,7 @@ extern "C" {
     );
 }
 extern "C" {
-    pub fn __gmpz_rrandomb(arg1: mpz_ptr, arg2: *mut __gmp_randstate_struct, arg3: mp_bitcnt_t);
+    pub fn __gmpz_rrandomb(arg1: mpz_ptr, arg2: gmp_randstate_ptr, arg3: mp_bitcnt_t);
 }
 extern "C" {
     pub fn __gmpz_scan0(arg1: mpz_srcptr, arg2: mp_bitcnt_t) -> mp_bitcnt_t;
@@ -13452,10 +13454,10 @@ extern "C" {
     );
 }
 extern "C" {
-    pub fn __gmpz_urandomb(arg1: mpz_ptr, arg2: *mut __gmp_randstate_struct, arg3: mp_bitcnt_t);
+    pub fn __gmpz_urandomb(arg1: mpz_ptr, arg2: gmp_randstate_ptr, arg3: mp_bitcnt_t);
 }
 extern "C" {
-    pub fn __gmpz_urandomm(arg1: mpz_ptr, arg2: *mut __gmp_randstate_struct, arg3: mpz_srcptr);
+    pub fn __gmpz_urandomm(arg1: mpz_ptr, arg2: gmp_randstate_ptr, arg3: mpz_srcptr);
 }
 extern "C" {
     pub fn __gmpz_xor(arg1: mpz_ptr, arg2: mpz_srcptr, arg3: mpz_srcptr);
@@ -13829,11 +13831,7 @@ extern "C" {
     pub fn __gmpf_ui_sub(arg1: mpf_ptr, arg2: ::std::os::raw::c_ulong, arg3: mpf_srcptr);
 }
 extern "C" {
-    pub fn __gmpf_urandomb(
-        arg1: *mut __mpf_struct,
-        arg2: *mut __gmp_randstate_struct,
-        arg3: mp_bitcnt_t,
-    );
+    pub fn __gmpf_urandomb(arg1: mpf_ptr, arg2: gmp_randstate_ptr, arg3: mp_bitcnt_t);
 }
 extern "C" {
     pub fn __gmpn_add(
@@ -14298,6 +14296,7 @@ pub const GMP_ERROR_UNSUPPORTED_ARGUMENT: _bindgen_ty_1 = 1;
 pub const GMP_ERROR_DIVISION_BY_ZERO: _bindgen_ty_1 = 2;
 pub const GMP_ERROR_SQRT_OF_NEGATIVE: _bindgen_ty_1 = 4;
 pub const GMP_ERROR_INVALID_ARGUMENT: _bindgen_ty_1 = 8;
+pub const GMP_ERROR_MPZ_OVERFLOW: _bindgen_ty_1 = 16;
 pub type _bindgen_ty_1 = ::std::os::raw::c_uint;
 extern "C" {
     pub fn pbc_set_msg_to_stderr(i: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
