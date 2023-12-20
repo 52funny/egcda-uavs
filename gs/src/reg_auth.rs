@@ -39,6 +39,7 @@ pub async fn register(addr: &str) -> anyhow::Result<()> {
 
 // Auth self to TA
 pub async fn auth(addr: &str) -> anyhow::Result<()> {
+    let tt = std::time::Instant::now();
     // connect to server
     let mut stream = TcpStream::connect(addr).await?;
 
@@ -109,7 +110,9 @@ pub async fn auth(addr: &str) -> anyhow::Result<()> {
     } else {
         anyhow::bail!("get gs auth phase2 response failed");
     };
+    println!("auth time: {:?}", tt.elapsed());
     tracing::info!("auth: {}", if status == 0 { "success" } else { "failed" });
+
     // means auth success
     if status == 0 {
         // receive uav list

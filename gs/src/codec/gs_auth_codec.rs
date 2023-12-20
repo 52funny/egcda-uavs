@@ -1,9 +1,19 @@
 use bytes::BufMut;
 use pb::auth_ta_gs::{GsAuthRequest, GsAuthResponse};
 use prost::Message;
-use tokio_util::codec;
-
+use tokio_util::codec::{self};
 pub struct GsAuthCodec;
+
+// pub type GsAuthCodec = DeafultCodec<GsAuthRequest, GsAuthResponse>;
+//
+// impl Default for GsAuthCodec {
+//     fn default() -> Self {
+//         DeafultCodec {
+//             _x: std::marker::PhantomData,
+//             _y: std::marker::PhantomData,
+//         }
+//     }
+// }
 
 impl GsAuthCodec {
     const MAX_SIZE: usize = 1024 * 1024 * 1024 * 8;

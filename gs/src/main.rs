@@ -37,6 +37,7 @@ pub struct UavAuthInfo {
     pub c: Vec<u8>,
     pub r: Vec<u8>,
     pub n: Integer,
+    pub t_u: i64,
 }
 
 impl Display for UavInfo {

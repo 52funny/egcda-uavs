@@ -7,11 +7,11 @@ message CommunicateMessage {
 }
 
 // Some parameters of the construction key, which used to encrypt the communication message
-message CommunicateParamMessage {
-    bytes lambda = 1;
-    int64 t = 2;
-    bytes c = 3;
-}
+// message CommunicateParamMessage {
+//     bytes lambda = 1;
+//     int64 t = 2;
+//     bytes c = 3;
+// }
 
 
 // Message including the ruid list
@@ -41,7 +41,7 @@ message UavGsCommunicateRequest {
 // The response message used to communicate gs to uav
 message UavGsCommunicateResponse {
     oneof response {
-        CommunicateParamMessage communicate_param = 1;
+        // CommunicateParamMessage communicate_param = 1;
         CommunicateMessage communicate_message = 2;
         UavRuidListMessage already_authenticated_ruid_list = 3;
         UavCommunicateParamMessage uav_communicate_param = 4;

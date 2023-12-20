@@ -18,7 +18,7 @@ use tokio_util::codec::Framed;
 
 pub async fn uav_auth_communicate(mut stream: TcpStream, _addr: SocketAddr) -> anyhow::Result<()> {
     tracing::debug!("---------------------------uav auth---------------------------");
-    let (uav_info, status) = uav_auth(&mut stream, _addr).await?;
+    let (uav_info, status, t_u) = uav_auth(&mut stream, _addr).await?;
     tracing::debug!("---------------------------uav auth---------------------------");
     tracing::info!("uav auth result: {}", if status { "ok" } else { "fail" });
     if !status {
@@ -33,6 +33,7 @@ pub async fn uav_auth_communicate(mut stream: TcpStream, _addr: SocketAddr) -> a
         c: uav_info.c,
         r: uav_info.r,
         n: uav_info.n,
+        t_u,
     };
     UAV_AUTH_LIST.0.insert(key.clone(), uav_auth_info.clone());
     let (tx, rx) = futures_channel::mpsc::unbounded::<(String, String)>();
@@ -68,22 +69,14 @@ async fn uav_commuicate(
 ) -> anyhow::Result<()> {
     let mut framed = Framed::new(stream, UavGsCommunicateCodec);
     let _ = framed.next().await;
-    let t = chrono::Utc::now().timestamp();
-    let mut hash_content = uav_auth_info.uid.clone();
-    hash_content.extend_from_slice(&t.to_be_bytes());
-    hash_content.extend_from_slice(&uav_auth_info.c);
-    let lambda = hex::decode(sha256::digest(&hash_content))?;
-    framed
-        .send(UavGsCommunicateResponse::new_communicate_param_message(
-            lambda.clone(),
-            t,
-            uav_auth_info.c.clone(),
-        ))
-        .await?;
+    // let t = chrono::Utc::now().timestamp();
+    let mut hash_content = uav_auth_info.t_u.to_be_bytes().to_vec();
+    hash_content.extend_from_slice(&uav_auth_info.r);
+    let pho_i = hex::decode(sha256::digest(&hash_content))?;
 
-    let mut key = lambda;
+    let mut key = pho_i;
     for (i, k) in key.iter_mut().enumerate() {
-        *k ^= uav_auth_info.r[i];
+        *k ^= uav_auth_info.uid[i];
     }
     let key = Key::<Aes256Gcm>::from_slice(&key);
     let aes = Aes256Gcm::new(key);
@@ -106,6 +99,7 @@ async fn uav_commuicate(
                 Some(uav_gs_communicate_request::Request::NeedCommunicateRuidList(list)) => {
                     tracing::info!("gs recv uav param: {:?}", list.ruid);
                     // 128 bit
+                    println!("{}", chrono::Utc::now().timestamp_millis());
                     let kd = rand::thread_rng().gen::<[u8; 16]>();
                     let kd = Integer::from_digits(&kd, rug::integer::Order::MsfBe);
                     let total = UAV_LIST.0.len();
@@ -185,7 +179,10 @@ async fn uav_commuicate(
     Ok(())
 }
 
-async fn uav_auth(stream: &mut TcpStream, _addr: SocketAddr) -> anyhow::Result<(UavInfo, bool)> {
+async fn uav_auth(
+    stream: &mut TcpStream,
+    _addr: SocketAddr,
+) -> anyhow::Result<(UavInfo, bool, i64)> {
     let mut framed = Framed::new(stream, UavAuthCodec);
     let ruid = if let Some(Ok(res)) = framed.next().await {
         if let Some(Request::Hello(ruid)) = res.request {
@@ -226,8 +223,8 @@ async fn uav_auth(stream: &mut TcpStream, _addr: SocketAddr) -> anyhow::Result<(
         .await?;
 
     // auth phase
-    let status = uav_auth_phase(&mut framed, &uav_info, id_gs, random_gs, r_gs).await?;
-    Ok((uav_info, status))
+    let (status, t_u) = uav_auth_phase(&mut framed, &uav_info, id_gs, random_gs, r_gs).await?;
+    Ok((uav_info, status, t_u))
 }
 
 /// 10 second
@@ -306,7 +303,7 @@ async fn uav_auth_phase(
     id_gs: Vec<u8>,
     random_gs: Vec<u8>,
     r_gs: Vec<u8>,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<(bool, i64)> {
     let phase = if let Some(Ok(res)) = framed.next().await {
         if let Some(Request::UavAuthPhase1(p)) = res.request {
             p
@@ -395,5 +392,5 @@ async fn uav_auth_phase(
     framed
         .send(UavAuthResponse::new_uav_auth_phase2_message(status))
         .await?;
-    Ok(status == 0)
+    Ok((status == 0, phase.t_u))
 }

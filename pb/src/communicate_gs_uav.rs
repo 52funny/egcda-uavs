@@ -6,18 +6,6 @@ pub struct CommunicateMessage {
     #[prost(bytes = "bytes", tag = "1")]
     pub encrypted_data: ::prost::bytes::Bytes,
 }
-/// Some parameters of the construction key, which used to encrypt the communication message
-#[derive(PartialOrd)]
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct CommunicateParamMessage {
-    #[prost(bytes = "bytes", tag = "1")]
-    pub lambda: ::prost::bytes::Bytes,
-    #[prost(int64, tag = "2")]
-    pub t: i64,
-    #[prost(bytes = "bytes", tag = "3")]
-    pub c: ::prost::bytes::Bytes,
-}
 /// Message including the ruid list
 #[derive(PartialOrd)]
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -69,7 +57,7 @@ pub mod uav_gs_communicate_request {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct UavGsCommunicateResponse {
-    #[prost(oneof = "uav_gs_communicate_response::Response", tags = "1, 2, 3, 4")]
+    #[prost(oneof = "uav_gs_communicate_response::Response", tags = "2, 3, 4")]
     pub response: ::core::option::Option<uav_gs_communicate_response::Response>,
 }
 /// Nested message and enum types in `UavGsCommunicateResponse`.
@@ -78,8 +66,7 @@ pub mod uav_gs_communicate_response {
     #[allow(clippy::derive_partial_eq_without_eq)]
     #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Response {
-        #[prost(message, tag = "1")]
-        CommunicateParam(super::CommunicateParamMessage),
+        /// CommunicateParamMessage communicate_param = 1;
         #[prost(message, tag = "2")]
         CommunicateMessage(super::CommunicateMessage),
         #[prost(message, tag = "3")]

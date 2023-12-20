@@ -1,7 +1,7 @@
 use crate::communicate_gs_uav::{
     uav_gs_communicate_request::Request, uav_gs_communicate_response::Response, CommunicateMessage,
-    CommunicateParamMessage, NeedCommunicateRuidListMessage, UavCommunicateParamMessage,
-    UavGsCommunicateRequest, UavGsCommunicateResponse, UavRuidListMessage,
+    NeedCommunicateRuidListMessage, UavCommunicateParamMessage, UavGsCommunicateRequest,
+    UavGsCommunicateResponse, UavRuidListMessage,
 };
 
 impl UavGsCommunicateRequest {
@@ -22,15 +22,15 @@ impl UavGsCommunicateRequest {
 }
 
 impl UavGsCommunicateResponse {
-    pub fn new_communicate_param_message(lambda: Vec<u8>, t: i64, c: Vec<u8>) -> Self {
-        Self {
-            response: Some(Response::CommunicateParam(CommunicateParamMessage {
-                lambda: lambda.into(),
-                t,
-                c: c.into(),
-            })),
-        }
-    }
+    // pub fn new_communicate_param_message(lambda: Vec<u8>, t: i64, c: Vec<u8>) -> Self {
+    //     Self {
+    //         response: Some(Response::CommunicateParam(CommunicateParamMessage {
+    //             lambda: lambda.into(),
+    //             t,
+    //             c: c.into(),
+    //         })),
+    //     }
+    // }
     pub fn new_communicate_message(message: Vec<u8>) -> Self {
         Self {
             response: Some(Response::CommunicateMessage(CommunicateMessage {

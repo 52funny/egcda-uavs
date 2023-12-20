@@ -17,18 +17,18 @@ pub async fn auth_comm(
 ) -> anyhow::Result<()> {
     let mut stream = TcpStream::connect(addr).await?;
     tracing::debug!("---------------------------uav auth---------------------------");
-    let status = auth(&mut stream).await?;
+    let (status, pho_i) = auth(&mut stream).await?;
     tracing::debug!("---------------------------uav auth---------------------------");
 
     tracing::info!("uav auth result: {}", if status { "ok" } else { "fail" });
 
     tracing::debug!("----------------------uav gs communicate----------------------");
-    communicate(stream, anonym_rx, param_tx).await?;
+    communicate(stream, anonym_rx, param_tx, pho_i).await?;
     tracing::debug!("----------------------uav gs communicate----------------------");
     Ok(())
 }
 
-async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
+async fn auth(stream: &mut TcpStream) -> anyhow::Result<(bool, Vec<u8>)> {
     let t = std::time::Instant::now();
     let mut framed = Framed::new(stream, UavAuthCodec);
     let ruid = UAV.get().unwrap().ruid.clone();
@@ -138,54 +138,55 @@ async fn auth(stream: &mut TcpStream) -> anyhow::Result<bool> {
         anyhow::bail!("framed recv at uav auth phase2 message error");
     };
     tracing::info!("uav auth phase2 speed time: {:?}", t.elapsed());
-    Ok(status == 0)
+    Ok((status == 0, pho_i))
 }
 
 async fn communicate(
     stream: TcpStream,
     mut anonym_rx: UnboundedReceiver<Vec<String>>,
     param_tx: UnboundedSender<(Vec<u8>, Vec<String>)>,
+    pho_i: Vec<u8>,
 ) -> anyhow::Result<()> {
     let mut framed = Framed::new(stream, UavGsCommunicateCodec);
     framed
         .send(UavGsCommunicateRequest::new_communicate_message(vec![]))
         .await?;
-    let param = if let Some(Ok(res)) = framed.next().await {
-        if let Some(uav_gs_communicate_response::Response::CommunicateParam(param)) = res.response {
-            param
-        } else {
-            anyhow::bail!("framed get uav communicate param message error");
-        }
-    } else {
-        anyhow::bail!("framed recv at uav communicate param message error");
-    };
-    tracing::debug!("lambda: {}", hex::encode(&param.lambda));
-    tracing::debug!("t     : {}", param.t);
-    tracing::debug!("c     : {}", hex::encode(&param.c));
+    // let param = if let Some(Ok(res)) = framed.next().await {
+    //     if let Some(uav_gs_communicate_response::Response::CommunicateParam(param)) = res.response {
+    //         param
+    //     } else {
+    //         anyhow::bail!("framed get uav communicate param message error");
+    //     }
+    // } else {
+    //     anyhow::bail!("framed recv at uav communicate param message error");
+    // };
+    // tracing::debug!("lambda: {}", hex::encode(&param.lambda));
+    // tracing::debug!("t     : {}", param.t);
+    // tracing::debug!("c     : {}", hex::encode(&param.c));
 
     // validate timestamp
-    let t_now = chrono::Utc::now().timestamp();
-    if t_now - param.t > 5 {
-        anyhow::bail!("t_now - param.t > 5");
-    }
+    // let t_now = chrono::Utc::now().timestamp();
+    // if t_now - param.t > 5 {
+    //     anyhow::bail!("t_now - param.t > 5");
+    // }
 
     // calculate lambda'
     let uid = UAV.get().unwrap().uid.clone();
-    let mut hash_content = uid;
-    hash_content.extend_from_slice(&param.t.to_be_bytes());
-    hash_content.extend_from_slice(&param.c);
-    let lambda_ = hex::decode(sha256::digest(&hash_content))?;
+    // let mut hash_content = uid;
+    // hash_content.extend_from_slice(&param.t.to_be_bytes());
+    // hash_content.extend_from_slice(&param.c);
+    // let lambda_ = hex::decode(sha256::digest(&hash_content))?;
 
     // validate lambda'
-    if lambda_ != param.lambda {
-        anyhow::bail!("lambda' != param.lambda");
-    }
-    let r = hex::decode(PUF.calculate(hex::encode(&param.c)).await?)?;
+    // if lambda_ != param.lambda {
+    //     anyhow::bail!("lambda' != param.lambda");
+    // }
+    // let r = hex::decode(PUF.calculate(hex::encode(&param.c)).await?)?;
 
     // calculate key
-    let mut key = lambda_;
+    let mut key = uid;
     for i in 0..key.len() {
-        key[i] ^= r[i];
+        key[i] ^= pho_i[i];
     }
 
     let key = Key::<Aes256Gcm>::from_slice(&key);
