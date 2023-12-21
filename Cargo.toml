@@ -1,4 +1,8 @@
 [workspace]
 resolver = "2"
-
 members = ["pb", "ta", "gs", "uav"]
+
+
+[profile.release]
+opt-level = 'z'
+# lto = true
