@@ -1,9 +1,11 @@
 [workspace]
+resolver = "3"
 
 members = [
-    "pb",
+    "rpc",
+    "utils",
     "ta",
     "gs",
-    "uav",
+    "uav" 
 ]
 

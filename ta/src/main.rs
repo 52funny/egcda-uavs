@@ -1,109 +1,89 @@
-mod codec;
-mod gs_reg_auth;
-mod uav_reg;
-use crate::gs_reg_auth::{gs_auth, gs_register};
-use crate::uav_reg::uav_register;
+mod rpc_impl;
+use blstrs_plus::{group::prime::PrimeCurveAffine, G2Affine, Scalar};
 use dashmap::DashMap;
+use futures::{future, StreamExt};
+use hex::ToHex;
 use lazy_static::lazy_static;
-use mcore::bn254::big::BIG;
-use mcore::bn254::ecp::ECP;
 use rand::Rng;
+use rpc::TaRpc;
+use rpc_impl::TA;
 use rug::Integer;
-use std::net::{IpAddr, SocketAddr};
-use tokio::{
-    io::AsyncReadExt,
-    net::{TcpListener, TcpStream},
-};
+use std::{future::Future, net::SocketAddr};
+use tarpc::{server, server::Channel, tokio_serde::formats::Json};
 use tracing_subscriber::EnvFilter;
 
+#[derive(Clone)]
 pub struct TAConfig {
-    pub sk_ta: BIG,
-    pub puk_ta: ECP,
-    pub sk_ta_bytes: Vec<u8>,
-    pub puk_ta_bytes: Vec<u8>,
+    pub sk: Scalar,
+    pub pk: G2Affine,
 }
 
 pub struct GsInfo {
-    pub gid: Vec<u8>,
-    pub rgid: Vec<u8>,
-    pub ip_addr: IpAddr,
+    pub gid: String,
+    pub pk: G2Affine,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct UavInfo {
-    pub uid: Vec<u8>,
-    pub ruid: Vec<u8>,
-    pub c: Vec<u8>,
-    pub r: Vec<u8>,
-    pub n: Integer,
+    pub uid: String,
+    pub sk: Scalar,
+    pub pk: G2Affine,
+    pub c: String,
+    pub r: String,
+    pub p: Integer,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UavList(DashMap<String, UavInfo>);
 
+const TAG: &[u8] = b"BLS_SIG_BLS12381G1_XMD:BLAKE2b-512_SSWU_RO_NUL_";
+const PUF_INPUT_SIZE: usize = 12;
+const T_MAX: usize = 10;
+
 lazy_static! {
     static ref TA_CONFIG: TAConfig = init_ta_keys();
     static ref GS_LIST: DashMap<String, GsInfo> = DashMap::new();
+    static ref GS_SSK_LIST: DashMap<String, String> = DashMap::new();
     static ref UAV_LIST: UavList = UavList(DashMap::new());
 }
 
 /// Init TA keys
-/// Including TA public key $ PUK_{ta} $ and TA private key sk_{ta}
 fn init_ta_keys() -> TAConfig {
-    let sk_bytes = rand::thread_rng().gen::<[u8; 32]>();
-    let sk_ta = BIG::frombytes(&sk_bytes);
-    let puk_ta = ECP::generator().mul(&sk_ta);
-    TAConfig {
-        sk_ta,
-        sk_ta_bytes: sk_bytes.to_vec(),
-        puk_ta_bytes: {
-            let mut puk_ta_bytes = vec![0u8; 65];
-            puk_ta.tobytes(&mut puk_ta_bytes, false);
-            puk_ta_bytes
-        },
-        puk_ta,
-    }
+    let sk_bytes = rand::thread_rng().gen::<[u64; 4]>();
+    let sk = Scalar::from_raw_unchecked(sk_bytes);
+    let pk = G2Affine::generator() * sk;
+    TAConfig { sk, pk: pk.into() }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // tracing logger
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("debug".parse().unwrap()))
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("ta=info".parse().unwrap()))
         .init();
 
-    tracing::info!("sk_ta: {}", TA_CONFIG.sk_ta);
-    tracing::info!("puk_ta: {}", TA_CONFIG.puk_ta);
+    tracing::info!("sk_ta: {}", TA_CONFIG.sk.to_be_bytes().encode_hex::<String>());
+    tracing::info!("puk_ta: {}", TA_CONFIG.pk.to_compressed().encode_hex::<String>());
+
     let addr: SocketAddr = ([0, 0, 0, 0], 8090).into();
-    let listener = TcpListener::bind(addr).await?;
-    loop {
-        // accept connections and process them serially
-        let (stream, addr) = listener.accept().await?;
-        tokio::spawn(async move {
-            if let Err(e) = tcp_accept(stream, addr).await {
-                tracing::warn!("{}", e);
-            }
-        });
-    }
+    let mut listener = tarpc::serde_transport::tcp::listen(&addr, Json::default).await?;
+    listener.config_mut().max_frame_length(usize::MAX);
+    tracing::info!("Listening on port {}", listener.local_addr().port());
+
+    let server = TA::new(TA_CONFIG.clone());
+
+    listener
+        // Ignore accept errors.
+        .filter_map(|r| future::ready(r.ok()))
+        .map(server::BaseChannel::with_defaults)
+        .map(|channel| channel.execute(server.clone().serve()).for_each(spawn))
+        .buffer_unordered(usize::MAX)
+        .for_each(|_| async {})
+        .await;
+
+    Ok(())
 }
 
-async fn tcp_accept(stream: TcpStream, addr: SocketAddr) -> anyhow::Result<()> {
-    let mut stream = stream;
-    tracing::info!("connection from {:?}", addr);
-    let types = stream.read_i8().await?;
-    // 0b0000_0001 means gs register
-    // 0b0000_0010 means uav register
-    //
-    // 0b0000_0100 means gs authentication
-    match types {
-        // gs register
-        0x01 => gs_register(stream, addr).await?,
-        // uav
-        0x02 => uav_register(stream, addr).await?,
-        // gs authentication
-        0x04 => gs_auth(stream, addr).await?,
-        // unreadable
-        _ => {}
-    }
-    Ok(())
+async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
+    tokio::spawn(fut);
 }

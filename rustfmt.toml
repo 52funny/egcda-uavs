@@ -1,0 +1,6 @@
+max_width = 140
+newline_style = "Auto"
+reorder_modules = true
+imports_indent = "Block"
+imports_layout = "Mixed"
+imports_granularity = "Crate"

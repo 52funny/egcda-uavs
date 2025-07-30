@@ -1,114 +1,127 @@
-import sys
 import socket
-from pypuf.simulation import XORArbiterPUF
 import numpy as np
 import hashlib
+import logging
+import asyncio
+import threading
+from pypuf.simulation import XORArbiterPUF
 
+# PUF parameters: each sub-challenge is 8 bits
+n = 8
+puf = XORArbiterPUF(n=n, k=1, seed=1)
 
-def hex_string_to_ndarray(hex_string):
-    binary_string = bin(int(hex_string, 16))[2:].zfill(256)
-    binary_array = np.array(
-        [int(bit)*2-1 for bit in binary_string], dtype=np.int8).reshape((32, 8))
-    return binary_array
+def hex_string_to_ndarray(hex_string: str) -> np.ndarray:
+    """
+    Convert a hex string into an ndarray of shape (rows, n),
+    where rows = (len(hex_string)*4) // n, and values are in {-1, +1}.
+    """
+    # Total bits is hex length * 4
+    bit_len = len(hex_string) * 4      # 12 bytes → 96 bits
+    # Binary string padded to bit_len
+    binary_string = bin(int(hex_string, 16))[2:].zfill(bit_len)
+    # Map '0'→-1, '1'→+1
+    arr = np.array([int(b)*2 - 1 for b in binary_string], dtype=np.int8)
+    rows = bit_len // n                # 96/8 = 12 rows
+    return arr.reshape((rows, n))
 
+def ndarray_to_hex_string(ndarray: np.ndarray) -> str:
+    """
+    Flatten a {-1,+1} ndarray into a binary string, then to hex.
+    Returns uppercase hex, zero-padded to the correct length.
+    """
+    flat = ndarray.flatten()
+    # +1→'1', -1→'0'
+    binary_string = ''.join('1' if x == 1 else '0' for x in flat)
+    # Hex length = bits // 4
+    hex_len = len(binary_string) // 4  # 96 bits → 24 hex chars
+    hexstr = hex(int(binary_string, 2))[2:].upper().zfill(hex_len)
+    return hexstr
 
-def ndarray_to_hex_string(ndarray):
-    # Flatten the ndarray to a 1D array
-    flattened_array = ndarray.flatten()
-
-    # Convert -1 to '0' and 1 to '1' in the flattened array
-    binary_array = ['1' if x == 1 else '0' for x in flattened_array]
-
-    # Join the binary digits into a single binary string
-    binary_string = ''.join(binary_array)
-
-    # Convert the binary string to a hex string
-    hex_string = hex(int(binary_string, 2))[2:].upper()
-
-    # Pad the hex string with leading zeros to make it 64 characters (256 bits)
-    hex_string = hex_string.zfill(64)
-
-    return hex_string
-
-
-# def generate_random_hex_string():
-#     num_bytes = 32  # 256 bits is equivalent to 32 bytes
-#     random_bytes = secrets.token_bytes(num_bytes)
-#     random_hex_string = random_bytes.hex().upper()
-#     return random_hex_string
-
-
-def expand_hex_string_to_ndarray(hex_string:str):
+def expand_hex_string_to_ndarray(hex_string: str) -> np.ndarray:
+    """
+    Expand the initial 12-byte challenge into 96 total sub-challenges:
+    start with shape (12,8), then hash 7 times to append 7×(12,8),
+    yielding a final (96,8) matrix.
+    """
+    # First block
+    c = hex_string_to_ndarray(hex_string)  # shape (12,8)
     m = hashlib.sha256()
-    c = hex_string_to_ndarray(hex_string)
-    for _ in range(0, 7):
+    for _ in range(7):
         m.update(hex_string.encode('utf-8'))
         hex_string = m.hexdigest()
-        nd = hex_string_to_ndarray(m.hexdigest())
+        nd = hex_string_to_ndarray(hex_string)  # also (12,8)
         c = np.concatenate((c, nd), axis=0)
-    return c
+    return c  # final shape (96,8)
 
+def get_puf(hex_challenge: str) -> str:
+    """
+    Compute the PUF response for a given 12-byte hex challenge.
+    Returns a 12-byte hex response.
+    """
+    c = expand_hex_string_to_ndarray(hex_challenge)  # (96,8)
+    r = puf.eval(c)                                   # 96-bit response
+    return ndarray_to_hex_string(r)[:24]                   # 24 hex chars
 
-puf = XORArbiterPUF(n=8, k=1, seed=1)
-def get_puf(c: str):
-    c = expand_hex_string_to_ndarray(c)
-    r = puf.eval(c)
-    return ndarray_to_hex_string(r)
+# --- TCP server: listen on port 12345 ---
+def recv_exact(sock, n):
+    data = b""
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return data
 
+def handle_client(conn, addr):
+    with conn:
+        conn.settimeout(10)
+        try:
+            buf = recv_exact(conn, 24)
+            if buf is None:
+                logging.warning("Client %s closed before sending the full challenge", addr)
+                return
+            hex_in = buf.decode("utf-8", errors="strict").strip()
+            logging.info("Received from %s: %r", addr, hex_in)
 
-# Simple Test
-# hex_str = generate_random_hex_string()
-# print("c=", hex_str)
-# t0 = time.time()
-# c = expand_hex_string_to_ndarray(hex_str)
-# t1 = time.time()
-# print("time=", (t1-t0) * 1000)
+            if len(hex_in) != 24:
+                logging.warning("Invalid length from %s: %d (expected 24)", addr, len(hex_in))
+                return
+            try:
+                int(hex_in, 16)
+            except ValueError:
+                logging.warning("Invalid hex from %s: %r", addr, hex_in)
+                return
 
+            hex_out = get_puf(hex_in)
+            conn.sendall(hex_out.encode("utf-8"))
+            logging.info("Replied to %s: %s", addr, hex_out)
+        except socket.timeout:
+            logging.warning("Timeout handling client %s", addr)
+        except (ConnectionResetError, BrokenPipeError) as e:
+            logging.warning("Connection error with %s: %s", addr, e)
+        except Exception:
+            logging.exception("Unexpected error with client %s", addr)
 
-# t0 = time.time()
-# r = puf.eval(c)
-# t1 = time.time()
-# print("time=", (t1-t0) * 1000)
+def run_server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind(("0.0.0.0", 12345))
+    server_socket.listen(0xff)
+    logging.info("Server listening on 0.0.0.0:12345")
 
-# print("r=", ndarray_to_hex_string(r))
-
-
-# Create a socket object
-server_socket = socket.socket(
-    socket.AF_INET, socket.SOCK_STREAM)
-
-# Get hostname
-host = socket.gethostname()
-
-port = 12345
-
-# Bind to the port
-server_socket.bind((host, port))
-
-# Set Max Connections
-server_socket.listen(2)
-
-while True:
     try:
-        # Accept Connections
-        stream, addr = server_socket.accept()
-
-        print("socket addr: %s" % str(addr))
-
-        buf = stream.recv(64)
-        print("buf=", buf.decode('utf-8'))
-        c = expand_hex_string_to_ndarray(buf.decode('utf-8'))
-        r = puf.eval(c)
-        r = ndarray_to_hex_string(r)
-        stream.send(r.encode('utf-8'))
-        stream.close()
-    except (ValueError):
-        print(addr, "ValueError")
-        stream.close()
-        continue
+        while True:
+            conn, addr = server_socket.accept()
+            logging.info("Accepted connection from %s", addr)
+            t = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
+            t.start()
     except KeyboardInterrupt:
-        print("finish")
-        stream.close()
+        logging.info("Shutting down server")
+    finally:
+        print("Closing server socket")
         server_socket.close()
-        sys.exit()
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+if __name__ == "__main__":
+    run_server()
