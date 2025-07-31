@@ -2,10 +2,7 @@
 resolver = "3"
 
 members = [
-    "rpc",
-    "utils",
     "ta",
     "gs",
     "uav" 
 ]
-

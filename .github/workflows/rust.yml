@@ -2,122 +2,159 @@ name: Rust
 
 on:
   push:
-    branches: [ "master" ]
-
-env:
-  CARGO_TERM_COLOR: always
-  GITHUB_ACTIONS: 1
+    branches: ["master"]
 
 jobs:
-  clippy-test:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Check out mcore repo
-      uses: actions/checkout@v3
-      with:
-        repository: miracl/core
-        path: ./core
-
-    - name: Setup miracl core
-      run: |
-        cd core/rust
-        echo -e "1\n28\n42\n0\n" | python3 config64.py
-        cp -r mcore ../../
-        cd ../../
-        echo -e "[features]\nstd=[]" >> mcore/Cargo.toml
-
-    - uses: actions/checkout@v3
-      with:
-        path: ./uav-scheme
-
-    - name: clippy
-      run: cd uav-scheme && cargo clippy --verbose
-    - name: Run tests
-      run: cd uav-scheme && cargo test --verbose
-
-  build-uav:
-    name: Build uav on aarch64
+  check:
+    name: Rust Check
     runs-on: ubuntu-latest
     steps:
-    - name: Check out mcore repo
-      uses: actions/checkout@v3
-      with:
-        repository: miracl/core
-        path: ./core
+      - uses: actions/checkout@v4
+      - name: Install latest nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          components: rustfmt, clippy
 
-    - name: Setup miracl core
-      run: |
-        cd core/rust
-        echo -e "1\n28\n42\n0\n" | python3 config64.py
-        cp -r mcore ../../
-        cd ../../
-        echo -e "[features]\nstd=[]" >> mcore/Cargo.toml
+      - name: Run cargo check
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
 
-    - uses: actions/checkout@v3
-      with:
-        path: ./uav-scheme
-    - uses: uraimo/run-on-arch-action@v2
-      with:
-        arch: aarch64
-        distro: ubuntu_latest
-        env: |
-          GITHUB_ACTIONS: 1
+  build-upload:
+    name: Release - ${{ matrix.platform.os-name }}
+    timeout-minutes: 360
+    strategy:
+      matrix:
+        platform:
+          - os-name: Linux-x86_64
+            runs-on: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+
+          - os-name: Linux-aarch64
+            runs-on: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+
+          - os-name: macOS-aarch64
+            runs-on: macos-14
+            target: aarch64-apple-darwin
+
+          # - os-name: windows-x86_64
+          #   runs-on: windows-latest
+          #   use-cross: true
+          #   target: x86_64-pc-windows-gnu
+          
+
+    runs-on: ${{ matrix.platform.runs-on }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Checkout Version
+        id: version
+        shell: bash
         run: |
-          cd uav-scheme
-          apt update -q -y
-          apt install curl build-essential pkg-config libssl-dev m4 -y
-          curl https://sh.rustup.rs -sSf | sh -s -- -y
-          source "$HOME/.cargo/env"
-          cargo build -p uav --release
-    - uses: actions/upload-artifact@v3
-      with:
-        name: uav
-        path: |
-          uav-scheme/target/release/uav
-          uav-scheme/puf_py/
+          set -euo pipefail
+          tag=$(git describe --tags --exact-match 2>/dev/null || true)
+          if [[ -n "$tag" ]]; then
+            version="$tag"
+          else
+            version=$(git rev-parse --short=7 HEAD)
+          fi
+          echo $version
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      
+      - name: Install GMP on Linux
+        if: matrix.platform.os-name == 'Linux-x86_64' || matrix.platform.os-name == 'Linux-aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgmp-dev libmpfr-dev
+
+      - name: Install GMP on macOS
+        if: matrix.platform.os-name == 'macOS-aarch64'
+        run: |
+          brew install gmp tree
+      
+      - name: Install Rust Toolchain Components
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.platform.target }}
+          override: true
+          default: true
+
+      - name: Show Version Information (Rust, cargo, GCC)
+        shell: bash
+        run: |
+          gcc --version || true
+          rustup -V
+          rustup toolchain list
+          rustup default
+          cargo -V
+          rustc -V
+
+      - name: Generate lockfile
+        run: cargo generate-lockfile
+
+      - name: Build binary
+        shell: bash
+        run: |
+          rustup default
+          cargo build --locked --release --target ${{ matrix.platform.target }}
+          tree -h .
+          if [ -f target/${{ matrix.platform.target }}/release/uav ]; then
+            echo "Build successful"
+          else
+            echo "Build failed"
+            exit 1
+          fi
+
+      - name: Build Archive
+        shell: bash
+        id: package
+        env:
+          target: ${{ matrix.platform.target }}
+          name: ${{ github.event.repository.name }}
+          version: ${{ steps.version.outputs.version }}
+
+        run: |
+          set -euxo pipefail
+          executable1=target/${target}/release/ta
+          executable2=target/${target}/release/gs
+          executable3=target/${target}/release/uav
+
+          dist_dir=`pwd`/dist
+          name=${name}-${version}-${target}
+
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            executable1=$executable1.exe
+            executable2=$executable2.exe
+            executable3=$executable3.exe
+          fi
+
+          mkdir -p $dist_dir
+          cp $executable1 $dist_dir
+          cp $executable2 $dist_dir
+          cp $executable3 $dist_dir
+          cd $dist_dir
+
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            archive=$dist_dir/$name.zip
+            7z a $archive *
+            echo "archive=dist/$name.zip" >> $GITHUB_OUTPUT
+          else
+              archive=$dist_dir/$name.tar.gz
+              tar -czf $archive *
+              echo "archive=dist/$name.tar.gz" >> $GITHUB_OUTPUT
+          fi
 
 
-  build-ta-gs:
-    name: Build TA and GS on x86_64
-    runs-on: ubuntu-latest
-    steps:
-    - name: Check out mcore repo
-      uses: actions/checkout@v3
-      with:
-        repository: miracl/core
-        path: ./core
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ github.event.repository.name }}-${{ steps.version.outputs.version }}-${{ matrix.platform.os-name }}"
+          path: |
+            dist/*.*
+            *.md
 
-    - name: Setup miracl core
-      run: |
-        cd core/rust
-        echo -e "1\n28\n42\n0\n" | python3 config64.py
-        cp -r mcore ../../
-        cd ../../
-        echo -e "[features]\nstd=[]" >> mcore/Cargo.toml
-
-    - uses: actions/checkout@v3
-      with:
-        path: ./uav-scheme
-    - uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        target: x86_64-unknown-linux-gnu
-        override: true
-    - uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: -p gs -p ta --manifest-path ./uav-scheme/Cargo.toml --release --target x86_64-unknown-linux-gnu
-    - run: |
-        cd ./uav-scheme/target/x86_64-unknown-linux-gnu/release
-        mkdir bin
-        cp ta ./bin
-        cp gs ./bin
-        ls -alh .
-        tree .
-
-    - uses: actions/upload-artifact@v3
-      with:
-        name: ta-gs
-        path: |
-          ./uav-scheme/target/x86_64-unknown-linux-gnu/release/bin/*
