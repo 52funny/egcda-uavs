@@ -18,6 +18,7 @@ use tarpc::{
 };
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use utils::abbreviate_key_default;
 
 #[derive(Debug, Clone)]
 pub struct GSConfig {
@@ -76,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
     let client = TaRpcClient::new(client::Config::default(), transport.await?).spawn();
 
     let pk_t = client.get_ta_pubkey(context::current()).await?;
-    info!("TA public key: {}", pk_t);
+    info!("TA's public key: {}", abbreviate_key_default(&pk_t));
     let pk_t = G2Affine::from_compressed_hex(&pk_t).expect("Invalid trust authority public key");
 
     // register self to TA

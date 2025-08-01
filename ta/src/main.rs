@@ -11,6 +11,7 @@ use rug::Integer;
 use std::{future::Future, net::SocketAddr};
 use tarpc::{server, server::Channel, tokio_serde::formats::Json};
 use tracing_subscriber::EnvFilter;
+use utils::abbreviate_key_default;
 
 #[derive(Clone)]
 pub struct TAConfig {
@@ -59,11 +60,13 @@ fn init_ta_keys() -> TAConfig {
 async fn main() -> anyhow::Result<()> {
     // tracing logger
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("ta=info".parse().unwrap()))
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("ta=info,tarpc=off".parse().unwrap()))
         .init();
 
-    tracing::info!("sk_ta: {}", TA_CONFIG.sk.to_be_bytes().encode_hex::<String>());
-    tracing::info!("puk_ta: {}", TA_CONFIG.pk.to_compressed().encode_hex::<String>());
+    let sk_hex = TA_CONFIG.sk.to_be_bytes().encode_hex::<String>();
+    let pk_hex = TA_CONFIG.pk.to_compressed().encode_hex::<String>();
+    tracing::info!("sk_ta: {}", abbreviate_key_default(&sk_hex));
+    tracing::info!("pk_ta: {}", abbreviate_key_default(&pk_hex));
 
     let addr: SocketAddr = ([0, 0, 0, 0], 8090).into();
     let mut listener = tarpc::serde_transport::tcp::listen(&addr, Json::default).await?;

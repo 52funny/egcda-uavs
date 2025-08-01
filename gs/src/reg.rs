@@ -2,6 +2,7 @@ use hex::ToHex;
 use rpc::TaRpcClient;
 use tarpc::context;
 use tracing::info;
+use utils::abbreviate_key_default;
 
 use crate::GS_CONFIG;
 
@@ -15,6 +16,6 @@ pub(crate) async fn register(client: &TaRpcClient) -> anyhow::Result<()> {
     };
 
     client.register_gs(context::current(), req).await?;
-    info!("Register ground station with gid: {}", gid);
+    info!("GS registered successfully: {}", abbreviate_key_default(&gid));
     Ok(())
 }

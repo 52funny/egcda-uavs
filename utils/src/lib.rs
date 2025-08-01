@@ -82,6 +82,30 @@ pub fn build_crt(p: Vec<Integer>) -> Integer {
     mi.iter().zip(mi_inv).map(|(m_i, m_i_inv)| m_i.clone() * m_i_inv).sum::<Integer>()
 }
 
+/// Abbreviate a string like: aa9f0...34865
+///
+/// Keeps the first `head` characters and last `tail` characters, inserting
+/// `placeholder` in between if truncation is needed.
+pub fn abbreviate_key(s: &str, head: usize, tail: usize, placeholder: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let total_len = chars.len();
+    let placeholder_len = placeholder.chars().count();
+
+    if total_len <= head + tail + placeholder_len {
+        return s.to_string();
+    }
+
+    let head_part: String = chars.iter().take(head).collect();
+    let tail_part: String = chars.iter().rev().take(tail).collect::<Vec<_>>().into_iter().rev().collect();
+
+    format!("{head_part}{placeholder}{tail_part}")
+}
+
+/// Convenience with defaults: keep 5 head, 5 tail, use "..." as placeholder.
+pub fn abbreviate_key_default(s: &str) -> String {
+    abbreviate_key(s, 5, 5, "...")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

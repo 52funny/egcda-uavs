@@ -6,7 +6,7 @@ use hex::ToHex;
 use rpc::{GsAuthRequest, GsAuthResponseStruct, TaRpcClient};
 use tarpc::context;
 use tracing::{debug, info};
-use utils::decrypt_aes128_gcm;
+use utils::{abbreviate_key_default, decrypt_aes128_gcm};
 
 #[allow(clippy::missing_transmute_annotations)]
 pub(crate) async fn auth(client: &TaRpcClient, ta_pk: &G2Affine) -> anyhow::Result<()> {
@@ -33,8 +33,8 @@ pub(crate) async fn auth(client: &TaRpcClient, ta_pk: &G2Affine) -> anyhow::Resu
         anyhow::bail!("Ground station authentication failed");
     }
 
-    info!("Ground station auth time elapsed: {:?}", std::time::Instant::now() - start);
-    info!("Ground station authenticated successfully with gid: {}", &gid);
+    info!("GS auth time elapsed: {:?}", std::time::Instant::now() - start);
+    info!("Successful authentication with TA: {}", abbreviate_key_default(&gid));
 
     let mut hasher = Blake2b512::new();
     hasher.update(tau.to_compressed());
@@ -67,5 +67,7 @@ pub(crate) async fn auth(client: &TaRpcClient, ta_pk: &G2Affine) -> anyhow::Resu
             },
         );
     }
+
+    info!("Received UAV list size: {}", UAV_LIST.0.len());
     Ok(())
 }

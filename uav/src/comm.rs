@@ -3,7 +3,7 @@ use rpc::*;
 use rug::Integer;
 use tarpc::context;
 use tracing::info;
-use utils::hash_to_prime;
+use utils::{abbreviate_key_default, hash_to_prime};
 
 pub async fn comm_with_uavs(client: &GsRpcClient) -> anyhow::Result<()> {
     let uid_k = UAV_AUTH_LIST.lock().unwrap().clone();
@@ -21,7 +21,7 @@ pub async fn comm_with_uavs(client: &GsRpcClient) -> anyhow::Result<()> {
 
     let k_d = mu.clone().modulo(&p);
 
-    info!("Generated key for UAV group communication: {}", k_d.to_string_radix(16));
+    info!("Group key: {}", abbreviate_key_default(&k_d.to_string_radix(16)));
 
     Ok(())
 }

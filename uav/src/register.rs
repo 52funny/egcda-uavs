@@ -2,7 +2,8 @@ use crate::{UavConfig, PUF};
 use blstrs_plus::{G2Affine, Scalar};
 use rpc::{TaRpcClient, UavRegisterRequest1};
 use tarpc::context;
-use tracing::info;
+use tracing::{debug, info};
+use utils::abbreviate_key_default;
 
 pub(crate) async fn register(client: &TaRpcClient) -> anyhow::Result<UavConfig> {
     let ctx = context::current();
@@ -11,7 +12,7 @@ pub(crate) async fn register(client: &TaRpcClient) -> anyhow::Result<UavConfig> 
         .register_uav_phase1(ctx, UavRegisterRequest1 {})
         .await?
         .ok_or_else(|| anyhow::anyhow!("UAV registration phase 1 failed"))?;
-    info!("UAV registration phase 1 completed: {:?}", resp1);
+    debug!("UAV registration phase 1 completed: {:?}", resp1);
 
     let puf_response = PUF
         .calculate(resp1.puf_challenge)
@@ -31,6 +32,6 @@ pub(crate) async fn register(client: &TaRpcClient) -> anyhow::Result<UavConfig> 
         .register_uav_phase2(ctx, req2)
         .await?
         .ok_or_else(|| anyhow::anyhow!("UAV registration phase 2 failed"))?;
-    info!("UAV registered successfully with uid: {}", resp1.uid);
+    info!("UAV registered with uid: {}", abbreviate_key_default(&resp1.uid));
     Ok(cfg)
 }

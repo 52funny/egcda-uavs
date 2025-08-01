@@ -5,7 +5,7 @@ use hex::ToHex;
 use rpc::*;
 use rug::integer::Order;
 use tracing::info;
-use utils::build_crt;
+use utils::{abbreviate_key_default, build_crt};
 
 #[derive(Debug, Clone)]
 pub struct GS {
@@ -64,9 +64,9 @@ impl GsRpc for GS {
 
         let rhs = rhs1 * rhs2;
         if lhs == rhs {
-            info!("UAV authentication successful for uid: {}", uid);
+            info!("UAV authenticate successful {}", abbreviate_key_default(&uid));
         } else {
-            tracing::warn!("UAV authentication failed for uid: {}", uid);
+            tracing::warn!("UAV authenticate failed for uid: {}", abbreviate_key_default(&uid));
             return None;
         }
         Some(UavAuthResponse2 {})
@@ -93,7 +93,7 @@ impl GsRpc for GS {
             .map(|uid| {
                 let uav_opt = UAV_LIST.0.get(uid);
                 if uav_opt.is_none() {
-                    tracing::warn!("UAV with uid {} not found", uid);
+                    tracing::warn!("UAV with uid {} not found", abbreviate_key_default(&uid));
                     return None;
                 }
                 let uav = uav_opt.unwrap();
@@ -106,7 +106,7 @@ impl GsRpc for GS {
 
         let bytes = rand::random::<[u8; 16]>();
         let kd = rug::Integer::from_digits(&bytes, Order::MsfBe);
-        info!("Generated key for uav group communication: {}", kd.to_string_radix(16));
+        info!("UAV group key: {}", abbreviate_key_default(&kd.to_string_radix(16)));
 
         let eta = build_crt(p);
         let mu = kd.clone() * eta;

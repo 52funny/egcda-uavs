@@ -8,8 +8,8 @@ use hex::ToHex;
 use lazy_static::lazy_static;
 use rpc::*;
 use rug::Integer;
-use tracing::info;
-use utils::{encrypt_aes128_gcm, hash_to_prime};
+use tracing::{debug, info, warn};
+use utils::{abbreviate_key_default, encrypt_aes128_gcm, hash_to_prime};
 
 lazy_static! {
     static ref state: DashMap<String, UavInfo> = DashMap::new();
@@ -36,7 +36,7 @@ impl TaRpc for TA {
         let pk_bytes = hex::decode(pk_str).expect("Failed to decode hex");
         let pk_array: [u8; 96] = pk_bytes.try_into().expect("Public key bytes length mismatch");
         let pk = G2Affine::from_compressed(&pk_array).expect("Failed to create G2Affine from bytes");
-        info!("Registered ground station gid: {}", gid);
+        info!("GS registered: {}", abbreviate_key_default(&gid));
         GS_LIST.insert(gid.clone(), GsInfo { gid, pk });
     }
 
@@ -50,7 +50,7 @@ impl TaRpc for TA {
         let t: [u8; 8] = t[0..8].try_into().expect("T_g bytes length mismatch");
         let t = i64::from_be_bytes(t);
         if (t_now - t) > T_MAX as i64 {
-            tracing::warn!("GS authentication failed: T_g is too old");
+            warn!("GS authentication failed: T_g is too old");
             return None;
         }
 
@@ -65,11 +65,11 @@ impl TaRpc for TA {
         let rhs = pairing(&tau.into(), &gs_info.pk);
 
         if lhs != rhs {
-            tracing::warn!("GS authentication failed for gid : {}", gid);
+            warn!("GS authentication failed for gid : {}", gid);
             return None;
         }
 
-        tracing::info!("Ground station authentication successful for gid: {}", gid);
+        info!("GS authentication successful for gid: {}", abbreviate_key_default(&gid));
 
         let mut hasher = Blake2b512::new();
         hasher.update(tau.to_compressed());
@@ -79,7 +79,7 @@ impl TaRpc for TA {
         let ssk = gs_info.pk * x * self.cfg.sk;
         let ssk_hex = ssk.to_compressed().encode_hex::<String>();
 
-        tracing::info!("Generated shared secret key for GS: {}", ssk_hex);
+        debug!("Generated shared secret key for GS: {}", abbreviate_key_default(&ssk_hex));
 
         // insert ssk into GS_SSK_LIST
         GS_SSK_LIST.insert(gid.clone(), ssk_hex);
@@ -130,13 +130,13 @@ impl TaRpc for TA {
             r: String::default(),
             p: Integer::default(),
         };
-        info!("uav info: {:?}", uav_info);
+        debug!("uav info: {:?}", uav_info);
 
         let sk_hex = sk.to_be_bytes().encode_hex::<String>();
         let pk_hex = pk.to_compressed().encode_hex::<String>();
 
         if state.contains_key(&uid) {
-            tracing::warn!("UAV with uid {} already exists, generating a new one", uid);
+            warn!("UAV with uid {} already exists, generating a new one", uid);
             return None;
         }
 
@@ -161,15 +161,15 @@ impl TaRpc for TA {
         let p = hash_to_prime(puf_response.clone() + &uid);
 
         let Some((_, mut uav_info)) = state.remove(&uid) else {
-            tracing::warn!("UAV with uid {} not found", uid);
+            warn!("UAV with uid {} not found", uid);
             return None;
         };
 
         uav_info.p = p;
         uav_info.r = puf_response;
 
-        info!("UAV registered with uid: {}", uid);
         UAV_LIST.0.insert(uid.clone(), uav_info);
+        info!("UAV registered with uid: {}", abbreviate_key_default(&uid));
 
         Some(rpc::UavRegisterResponse2 {})
     }

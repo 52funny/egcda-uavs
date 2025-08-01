@@ -5,6 +5,7 @@ use hex::ToHex;
 use rpc::*;
 use tarpc::context;
 use tracing::{info, warn};
+use utils::abbreviate_key_default;
 
 pub(crate) async fn auth(client: &GsRpcClient) -> anyhow::Result<()> {
     let uav = UAV_CONFIG.get().cloned().expect("UAV not found");
@@ -14,7 +15,7 @@ pub(crate) async fn auth(client: &GsRpcClient) -> anyhow::Result<()> {
         .authenticate_uav_phase1(context::current(), UavAuthRequest1 { uid: uid.clone() })
         .await?;
     if resp1.is_none() {
-        info!("UAV authentication failed: UAV not registered or invalid UID");
+        warn!("UAV not registered or invalid UID");
         return Ok(());
     }
     let resp1 = resp1.unwrap();
@@ -53,6 +54,6 @@ pub(crate) async fn auth(client: &GsRpcClient) -> anyhow::Result<()> {
         return Ok(());
     }
     info!("Authentication took: {:?}", start.elapsed());
-    info!("UAV authentication successful with uid: {:?}", uid);
+    info!("UAV authentication successful with uid: {}", abbreviate_key_default(&uid));
     Ok(())
 }

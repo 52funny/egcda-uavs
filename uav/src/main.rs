@@ -104,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
     let t = std::time::Instant::now();
     comm_with_uavs(&client).await?;
     info!("Communicate group size: {}", ids.len());
-    info!("Communicate group key generated in {:?}", t.elapsed());
+    info!("Communicate group key time elapsed: {:?}", t.elapsed());
     Ok(())
 }
 
