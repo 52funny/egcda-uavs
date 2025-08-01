@@ -93,7 +93,7 @@ mod tests {
         let t = std::time::Instant::now();
         let prime = hash_to_prime(data);
         println!("Time taken: {:?}", t.elapsed());
-        println!("Generated prime: {}", prime);
+        println!("Generated prime: {prime}");
 
         assert!(prime.is_probably_prime(10) != IsPrime::No);
     }

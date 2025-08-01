@@ -119,7 +119,7 @@ impl<'de> Deserialize<'de> for UavConfig {
                             let hex_str: String = map.next_value()?;
                             let scalar_ctopt = Scalar::from_be_hex(&hex_str);
                             if scalar_ctopt.is_none().into() {
-                                return Err(de::Error::custom(format!("sk hex decode error: {}", hex_str)));
+                                return Err(de::Error::custom(format!("sk hex decode error: {hex_str}")));
                             }
                             let scalar: Scalar = scalar_ctopt.unwrap();
                             sk = Some(scalar);
@@ -131,7 +131,7 @@ impl<'de> Deserialize<'de> for UavConfig {
                             let hex_str: String = map.next_value()?;
                             let g2_ctopt = G2Affine::from_compressed_hex(&hex_str);
                             if g2_ctopt.is_none().into() {
-                                return Err(de::Error::custom(format!("pk hex decode error: {}", hex_str)));
+                                return Err(de::Error::custom(format!("pk hex decode error: {hex_str}")));
                             }
                             let g2 = g2_ctopt.unwrap();
                             pk = Some(g2);
