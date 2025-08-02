@@ -23,6 +23,9 @@ struct CliArgs {
     #[arg(short, long, help = "Register number", default_value = "10")]
     pub num: usize,
 
+    #[arg(short, long, help = "Number of authentication attempts", default_value = "1")]
+    pub all_auth_num: usize,
+
     #[arg(short, long, default_value = "127.0.0.1")]
     pub ta_ip: String,
 
@@ -39,10 +42,12 @@ struct CliArgs {
 const TAG: &[u8] = b"BLS_SIG_BLS12381G1_XMD:BLAKE2b-512_SSWU_RO_NUL_";
 
 lazy_static! {
-    static ref PUF: Puf = Puf::new(([127, 0, 0, 1], 12345));
+    // static ref PUF: Puf = Puf::new(([127, 0, 0, 1], 12345));
     static ref UAV_AUTH_LIST: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(vec![]);
 }
 static UAV_CONFIG: OnceCell<UavConfig> = OnceCell::const_new();
+
+static PUF: OnceCell<Puf> = OnceCell::const_new();
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -54,6 +59,12 @@ async fn main() -> anyhow::Result<()> {
 
     let ta_addr = format!("{}:{}", args.ta_ip, args.ta_port);
     let gs_addr = format!("{}:{}", args.gs_ip, args.gs_port);
+
+    PUF.get_or_init(|| async {
+        let puf = Puf::new(([127, 0, 0, 1], 12345)).await.expect("Failed to initialize PUF");
+        puf
+    })
+    .await;
 
     if args.register || !std::fs::exists("uav.json")? {
         let mut transport = tarpc::serde_transport::tcp::connect(&ta_addr, Json::default);
@@ -92,8 +103,12 @@ async fn main() -> anyhow::Result<()> {
     let client = GsRpcClient::new(client::Config::default(), transport.await?).spawn();
     info!("Connected to GS at {}", &gs_addr);
 
-    // auth if self
-    auth(&client).await?;
+    let t = std::time::Instant::now();
+    for _ in 0..args.all_auth_num {
+        // auth if self
+        auth(&client).await?;
+    }
+    info!("Auth {} time elapsed: {:?}", args.all_auth_num, t.elapsed());
 
     let ids = client
         .get_all_uav_id(context::current(), UAV_CONFIG.get().unwrap().uid.clone())

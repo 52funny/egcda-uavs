@@ -68,8 +68,8 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("gs=info".parse().unwrap()))
         .init();
 
-    let ta_addr = "127.0.0.1:8090";
-    let bind_addr = "127.0.0.1:8091";
+    let ta_addr = "0.0.0.0:8090";
+    let bind_addr = "0.0.0.0:8091";
 
     let mut transport = tarpc::serde_transport::tcp::connect(&ta_addr, Json::default);
     transport.config_mut().max_frame_length(usize::MAX);

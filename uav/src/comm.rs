@@ -15,7 +15,7 @@ pub async fn comm_with_uavs(client: &GsRpcClient) -> anyhow::Result<()> {
     let mu = Integer::from_str_radix(&resp.mu, 16)?;
     let c_1 = resp.c_m.first().ok_or(anyhow::anyhow!("Empty c_m"))?.clone();
 
-    let puf_response = PUF.calculate(c_1).await?;
+    let puf_response = PUF.get().unwrap().calculate(c_1).await?;
 
     let p = hash_to_prime(puf_response + &UAV_CONFIG.get().unwrap().uid);
 

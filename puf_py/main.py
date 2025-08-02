@@ -72,35 +72,72 @@ def recv_exact(sock, n):
         data += chunk
     return data
 
+# def handle_client(conn, addr):
+#     with conn:
+#         conn.settimeout(10)
+#         while True:
+#             try:
+#                 buf = recv_exact(conn, 24)
+#                 if buf is None:
+#                     logging.warning("Client %s closed before sending the full challenge", addr)
+#                     return
+#                 hex_in = buf.decode("utf-8", errors="strict").strip()
+#                 logging.info("Received from %s: %r", addr, hex_in)
+
+#                 if len(hex_in) != 24:
+#                     logging.warning("Invalid length from %s: %d (expected 24)", addr, len(hex_in))
+#                     return
+#                 try:
+#                     int(hex_in, 16)
+#                 except ValueError:
+#                     logging.warning("Invalid hex from %s: %r", addr, hex_in)
+#                     return
+
+#                 hex_out = get_puf(hex_in)
+#                 conn.sendall(hex_out.encode("utf-8"))
+#                 logging.info("Replied to %s: %s", addr, hex_out)
+#             except socket.timeout:
+#                 logging.warning("Timeout handling client %s", addr)
+#             except (ConnectionResetError, BrokenPipeError) as e:
+#                 logging.warning("Connection error with %s: %s", addr, e)
+#             except Exception:
+#                 logging.exception("Unexpected error with client %s", addr)
+
+
 def handle_client(conn, addr):
     with conn:
+        # consider removing or increasing this if you want long-idle connections
         conn.settimeout(10)
         try:
-            buf = recv_exact(conn, 24)
-            if buf is None:
-                logging.warning("Client %s closed before sending the full challenge", addr)
-                return
-            hex_in = buf.decode("utf-8", errors="strict").strip()
-            logging.info("Received from %s: %r", addr, hex_in)
+            while True:
+                # read exactly 24 hex chars challenge
+                buf = recv_exact(conn, 24)
+                if buf is None:
+                    logging.info("Client %s closed the connection", addr)
+                    return
 
-            if len(hex_in) != 24:
-                logging.warning("Invalid length from %s: %d (expected 24)", addr, len(hex_in))
-                return
-            try:
-                int(hex_in, 16)
-            except ValueError:
-                logging.warning("Invalid hex from %s: %r", addr, hex_in)
-                return
+                hex_in = buf.decode("utf-8", errors="strict").strip()
+                logging.info("Received from %s: %r", addr, hex_in)
 
-            hex_out = get_puf(hex_in)
-            conn.sendall(hex_out.encode("utf-8"))
-            logging.info("Replied to %s: %s", addr, hex_out)
+                if len(hex_in) != 24:
+                    logging.warning("Invalid length from %s: %d (expected 24)", addr, len(hex_in))
+                    return
+                try:
+                    int(hex_in, 16)
+                except ValueError:
+                    logging.warning("Invalid hex from %s: %r", addr, hex_in)
+                    return
+
+                hex_out = get_puf(hex_in)
+                conn.sendall(hex_out.encode("utf-8"))
+                logging.info("Replied to %s: %s", addr, hex_out)
         except socket.timeout:
             logging.warning("Timeout handling client %s", addr)
         except (ConnectionResetError, BrokenPipeError) as e:
             logging.warning("Connection error with %s: %s", addr, e)
         except Exception:
             logging.exception("Unexpected error with client %s", addr)
+
 
 def run_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

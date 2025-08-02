@@ -41,7 +41,7 @@ pub(crate) async fn auth(client: &TaRpcClient, ta_pk: &G2Affine) -> anyhow::Resu
     let x = hasher.finalize();
     let x = Scalar::from_bytes_wide(unsafe { &std::mem::transmute::<_, [u8; 64]>(x) });
 
-    let ssk = ta_pk * x * GS_CONFIG.sk;
+    let ssk = ta_pk * (x * GS_CONFIG.sk);
     let ssk_bytes = ssk.to_compressed();
 
     let resp = client.get_uav_list(context::current(), gid.clone()).await?;

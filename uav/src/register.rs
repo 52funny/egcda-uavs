@@ -15,6 +15,8 @@ pub(crate) async fn register(client: &TaRpcClient) -> anyhow::Result<UavConfig> 
     debug!("UAV registration phase 1 completed: {:?}", resp1);
 
     let puf_response = PUF
+        .get()
+        .unwrap()
         .calculate(resp1.puf_challenge)
         .await
         .map_err(|e| anyhow::anyhow!("PUF calculation failed of {}", e))?;
