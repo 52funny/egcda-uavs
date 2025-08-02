@@ -258,6 +258,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake2",
+ "blstrs_plus",
+ "chrono",
+ "hex",
+ "rand 0.8.5",
+ "rug",
+ "utils",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

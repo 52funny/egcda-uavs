@@ -12,4 +12,5 @@ cp:
 	cp target/release/ta ${OUT_DIR}/ta
 	cp target/release/gs ${OUT_DIR}/gs
 	cp target/release/uav ${OUT_DIR}/uav
+	cp target/release/bm ${OUT_DIR}/bm
 
