@@ -1,31 +1,3 @@
-// use std::net::SocketAddr;
-// use tokio::{
-//     io::{AsyncReadExt, AsyncWriteExt},
-//     net::TcpStream,
-// };
-
-// /// This puf is simulated by python pypuf library.
-// /// Using internal TCP communication.
-// /// without any external communication.
-// pub struct Puf {
-//     addr: SocketAddr,
-// }
-
-// impl Puf {
-//     pub fn new(addr: impl Into<SocketAddr>) -> Self {
-//         Self { addr: addr.into() }
-//     }
-//     pub async fn calculate(&self, c: impl AsRef<[u8]>) -> anyhow::Result<String> {
-//         let t = std::time::Instant::now();
-//         let mut stream = TcpStream::connect(self.addr).await?;
-//         stream.write_all(c.as_ref()).await?;
-//         let mut v = Vec::new();
-//         stream.read_to_end(&mut v).await?;
-//         println!("PUF time elapsed: {:?}", t.elapsed());
-//         Ok(unsafe { String::from_utf8_unchecked(v) })
-//     }
-// }
-
 use anyhow::{bail, Context};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -35,7 +7,7 @@ use tokio::{
     sync::Mutex,
 };
 
-/// Puf client that reuses a single TCP connection and exchanges fixed-size (12-byte) messages.
+/// Puf client that reuses a single TCP connection and exchanges fixed-size (24-byte) messages.
 pub struct Puf {
     writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
     reader: Arc<Mutex<BufReader<tokio::net::tcp::OwnedReadHalf>>>,
@@ -53,7 +25,7 @@ impl Puf {
         })
     }
 
-    /// Send a 12-byte challenge and read a 12-byte response over the existing connection.
+    /// Send a 24-byte hex style challenge and read a 24-byte hex style response over the existing connection.
     pub async fn calculate(&self, c: impl AsRef<[u8]>) -> anyhow::Result<String> {
         let payload = c.as_ref();
         if payload.len() != 24 {
@@ -74,7 +46,7 @@ impl Puf {
             reader.read_exact(&mut resp_buf).await?;
         }
 
-        // Convert response to String. If the response may not be valid UTF-8, consider returning Vec<u8>.
+        // Convert response to String.
         let s = String::from_utf8(resp_buf.to_vec())?;
         Ok(s)
     }
