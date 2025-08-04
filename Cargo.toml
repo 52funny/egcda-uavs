@@ -4,5 +4,6 @@ resolver = "3"
 members = [
     "ta",
     "gs",
-    "uav" 
-, "bm"]
+    "uav",
+    "bm"
+]

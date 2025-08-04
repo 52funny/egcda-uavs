@@ -1,6 +1,7 @@
 use blake2::{Blake2b512, Digest};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
+use rayon::prelude::*;
 use rug::{
     Integer,
     integer::{IsPrime, Order},
@@ -71,15 +72,18 @@ pub fn decrypt_aes128_gcm(key: &[u8; 16], ciphertext: &[u8]) -> anyhow::Result<V
 }
 
 pub fn build_crt(p: Vec<Integer>) -> Integer {
-    let m = p.iter().product::<Integer>();
-    let mi = p.iter().map(|x| m.clone() / x).collect::<Vec<_>>();
+    let m = p.par_iter().product::<Integer>();
+    let mi = p.par_iter().map(|x| m.clone() / x).collect::<Vec<_>>();
     let mi_inv = mi
-        .iter()
+        .par_iter()
         .zip(p)
         .map(|(m_i, p)| m_i.clone().invert(&p).expect("Failed to invert"))
         .collect::<Vec<_>>();
 
-    mi.iter().zip(mi_inv).map(|(m_i, m_i_inv)| m_i.clone() * m_i_inv).sum::<Integer>()
+    mi.par_iter()
+        .zip(mi_inv)
+        .map(|(m_i, m_i_inv)| m_i.clone() * m_i_inv)
+        .sum::<Integer>()
 }
 
 /// Abbreviate a string like: aa9f0...34865
