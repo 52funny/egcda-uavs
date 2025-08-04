@@ -3,7 +3,10 @@ mod comm;
 mod puf;
 mod register;
 mod uav_cfg;
-use crate::{auth::auth, comm::comm_with_uavs};
+use crate::{
+    auth::{auth, batch_auth},
+    comm::comm_with_uavs,
+};
 use clap::Parser;
 use lazy_static::lazy_static;
 use puf::Puf;
@@ -25,6 +28,9 @@ struct CliArgs {
 
     #[arg(short, long, help = "Number of authentication attempts", default_value = "1")]
     pub all_auth_num: usize,
+
+    #[arg(short, long, help = "Batch authentication", default_value = "1")]
+    pub batch_auth: Option<usize>,
 
     #[arg(short, long, default_value = "127.0.0.1")]
     pub ta_ip: String,
@@ -81,6 +87,9 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        // save the register uav configs
+        serde_json::to_writer(std::fs::File::create("uav.json")?, &good_cfgs)?;
+
         let uav_cfg = good_cfgs
             .last()
             .cloned()
@@ -88,20 +97,33 @@ async fn main() -> anyhow::Result<()> {
 
         UAV_CONFIG.set(uav_cfg.clone()).ok();
         tracing::debug!("uav: {:?}", UAV_CONFIG.get());
-        let f = std::fs::File::create("uav.json")?;
-        serde_json::to_writer(f, &uav_cfg)?;
         return Ok(());
     }
 
+    // read uav config from file
     let f = std::fs::File::open("uav.json").expect("not found uav.json, please register.");
-    let uav = serde_json::from_reader::<_, UavConfig>(f)?;
-    UAV_CONFIG.set(uav).expect("UAV_CONFIG already set");
+    let uavs = serde_json::from_reader::<_, Vec<UavConfig>>(f)?;
 
     let mut transport = tarpc::serde_transport::tcp::connect(&gs_addr, Json::default);
     transport.config_mut().max_frame_length(usize::MAX);
 
     let client = GsRpcClient::new(client::Config::default(), transport.await?).spawn();
     info!("Connected to GS at {}", &gs_addr);
+
+    if let Some(num) = args.batch_auth {
+        let uavs = uavs.into_iter().take(num).collect::<Vec<_>>();
+        if uavs.len() != num {
+            return Err(anyhow::anyhow!("Not enough UAVs for batch authentication"));
+        }
+        info!("Batch authentication with {} UAVs", uavs.len());
+        let t = std::time::Instant::now();
+        batch_auth(&client, uavs).await?;
+        info!("Batch authentication time elapsed: {:?}", t.elapsed());
+        return Ok(());
+    }
+
+    let uav = uavs.first().ok_or(anyhow::anyhow!("No UAV config found in uav.json"))?.clone();
+    UAV_CONFIG.set(uav).expect("UAV_CONFIG already set");
 
     let t = std::time::Instant::now();
     for _ in 0..args.all_auth_num {

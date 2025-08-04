@@ -5,6 +5,8 @@ pub trait GsRpc {
     async fn authenticate_uav_phase2(req: UavAuthRequest2) -> Option<UavAuthResponse2>;
     async fn get_all_uav_id(id: String) -> Vec<String>;
     async fn communicate_uavs(req: UavCommRequest) -> Option<UavCommResponse>;
+    async fn batch_authenticate_uavs_phase1(reqs: Vec<String>) -> Option<Vec<String>>;
+    async fn batch_authenticate_uavs_phase2(reqs: Vec<UavAuthRequest2>) -> Option<UavAuthResponse2>;
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

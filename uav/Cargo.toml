@@ -29,3 +29,4 @@ clap = { version = "4.3.19", features = ["derive"] }
 tarpc = { version = "0.36.0", features = ["full"] }
 blstrs_plus = { version = "0.8.18", features = ["portable", "serde"] }
 blake2 = "0.10.6"
+rayon = "1.10.0"

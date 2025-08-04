@@ -32,3 +32,4 @@ futures-channel = "0.3.28"
 blstrs_plus = "0.8.18"
 tarpc = { version = "0.36.0", features = ["full"] }
 blake2 = "0.10.6"
+rayon = "1.10.0"
