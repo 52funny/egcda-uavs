@@ -110,6 +110,11 @@ async fn main() -> anyhow::Result<()> {
     }
     info!("Auth {} time elapsed: {:?}", args.all_auth_num, t.elapsed());
 
+    // parallel optimization
+    // let t = std::time::Instant::now();
+    // futures::future::join_all((0..args.all_auth_num).map(|_| call_auth(&client))).await;
+    // info!("Auth {} time elapsed: {:?}", args.all_auth_num, t.elapsed());
+
     let ids = client
         .get_all_uav_id(context::current(), UAV_CONFIG.get().unwrap().uid.clone())
         .await?;
@@ -123,20 +128,15 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// async fn call_register(ta_addr: &str) -> anyhow::Result<UavConfig> {
-//     let mut transport = tarpc::serde_transport::tcp::connect(ta_addr, Json::default);
-//     transport.config_mut().max_frame_length(usize::MAX);
-
-//     let client = TaRpcClient::new(client::Config::default(), transport.await?).spawn();
-
-//     info!("Connected to TA at {}", ta_addr);
-//     // Register multiple UAVs and use the last config
-//     let cfg = register(&client).await?;
-//     Ok(cfg)
-// }
-
 async fn call_register(client: &TaRpcClient) -> anyhow::Result<UavConfig> {
     // Register multiple UAVs and use the last config
     let cfg = register(client).await?;
     Ok(cfg)
+}
+
+#[allow(dead_code)]
+async fn call_auth(client: &GsRpcClient) -> anyhow::Result<()> {
+    // Authenticate with the group server
+    auth(client).await?;
+    Ok(())
 }
