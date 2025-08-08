@@ -1,5 +1,8 @@
 # An Efficient Group Communication Scheme with Delegated Authentication for UAV Swarms
 
+![SMC@AHU](https://img.shields.io/badge/SMC@-AHU-blue)
+![License](https://img.shields.io/github/license/52funny/egcda-uavs)
+
 ## Overview
 This repository contains the implementation of the work, a secure and efficient group communication framework designed for **UAV swarms**.
 The framework is implemented in Rust to leverage the language’s **memory safety**, **high performance**, and **concurrency** advantages. It provides a distributed architecture integrating: **Ground Station**, **UAV Nodes**, and **Trust Authority**, with shared libraries `rpc` and `utils` for communication and utility functions.
