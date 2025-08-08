@@ -1,6 +1,8 @@
 mod auth;
 mod comm;
 mod puf;
+// this module is for serial communication with PUF
+// mod puf_serial;
 mod register;
 mod uav_cfg;
 use crate::{
