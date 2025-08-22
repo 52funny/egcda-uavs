@@ -6,10 +6,10 @@ edition = "2024"
 [dependencies]
 utils = { path = "../utils" }
 hex = "0.4.3"
-anyhow = "1.0.72"
+anyhow = "1.0.99"
 rand = "0.8.5"
-chrono = "0.4.26"
-rug = { version = "1.19.2", features = ["serde"] }
+chrono = "0.4.41"
+rug = { version = "1.28.0", features = ["serde"] }
 blstrs_plus = { version = "0.8.18", features = ["portable", "serde"] }
 blake2 = "0.10.6"
-tokio = { version = "1.44.0", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full"] }

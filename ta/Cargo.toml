@@ -9,22 +9,22 @@ edition = "2021"
 rpc = { path = "../rpc" }
 utils = { path = "../utils" }
 
-bytes = "1.4.0"
-futures = "0.3.28"
+bytes = "1.10.1"
+futures = "0.3.31"
 hex = "0.4.3"
 hex-literal = "0.4.1"
-tokio = { version = "1.29.1", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full"] }
 # tokio-util = { version = "0.7.8", features = ["codec"] }
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
-tracing = "0.1.37"
-anyhow = "1.0.72"
-lazy_static = "1.4.0"
-dashmap = { version = "5.5.0", features = ["serde"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing = "0.1.41"
+anyhow = "1.0.99"
+lazy_static = "1.5.0"
+dashmap = { version = "5.5.3", features = ["serde"] }
 rand = "0.8.5"
-chrono = "0.4.26"
-rug = { version = "1.19.2", features = ["serde"] }
-serde = { version = "1.0.174", features = ["derive"] }
-serde_json = "1.0.103"
+chrono = "0.4.41"
+rug = { version = "1.28.0", features = ["serde"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.143"
 tarpc = { version = "0.36.0", features = ["full"] }
 # blstrs_plus = "0.8.18"
 blstrs_plus = { version = "0.8.18", features = ["serde"] }
