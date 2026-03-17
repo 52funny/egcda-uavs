@@ -1,6 +1,8 @@
 use crate::{UavInfo, GS_CONFIG, TAG, UAV_LIST};
 use blake2::{Blake2b512, Digest};
-use blstrs_plus::{elliptic_curve::hash2curve::ExpandMsgXmd, G1Projective, G2Affine, Scalar};
+use blstrs_plus::{
+    elliptic_curve::hash2curve::ExpandMsgXmd, group::prime::PrimeCurveAffine, pairing, G1Affine, G1Projective, G2Affine, Scalar,
+};
 use chrono::Utc;
 use hex::ToHex;
 use rpc::{GsAuthRequest, GsAuthResponseStruct, TaRpcClient};
@@ -25,16 +27,37 @@ pub(crate) async fn auth(client: &TaRpcClient, ta_pk: &G2Affine) -> anyhow::Resu
 
     let req = GsAuthRequest {
         gid: gid.clone(),
-        t_g: t_g_hex,
+        t_g: t_g_hex.clone(),
         sigma: sig.to_compressed().encode_hex::<String>(),
     };
 
-    if client.authenticate_gs(context::current(), req).await?.is_none() {
+    let resp = client.authenticate_gs(context::current(), req).await?;
+    if resp.is_none() {
         anyhow::bail!("Ground station authentication failed");
     }
+    let resp = resp.unwrap();
 
     info!("GS auth time elapsed: {:?}", std::time::Instant::now() - start);
     info!("Successful authentication with TA: {}", abbreviate_key_default(&gid));
+
+    let t_a = hex::decode(&resp.t_a)?;
+    let t_a: [u8; 8] = t_a[0..8].try_into().expect("T_a bytes length mismatch");
+    let t_a = i64::from_be_bytes(t_a);
+    if (Utc::now().timestamp() - t_a).abs() > crate::T_MAX {
+        anyhow::bail!("Trust authority authentication response is too old");
+    }
+
+    let mut h_a_buf = Vec::with_capacity(gid.len() + t_g_hex.len() + resp.t_a.len());
+    h_a_buf.extend_from_slice(gid.as_bytes());
+    h_a_buf.extend_from_slice(t_g_hex.as_bytes());
+    h_a_buf.extend_from_slice(resp.t_a.as_bytes());
+    let h_a = G1Projective::hash::<ExpandMsgXmd<Blake2b512>>(&h_a_buf, TAG);
+    let sigma_t = G1Affine::from_compressed_hex(&resp.sigma_t).expect("Invalid TA signature");
+    let lhs = pairing(&sigma_t, &G2Affine::generator());
+    let rhs = pairing(&G1Affine::from(h_a), ta_pk);
+    if lhs != rhs {
+        anyhow::bail!("Trust authority signature verification failed");
+    }
 
     let mut hasher = Blake2b512::new();
     hasher.update(tau.to_compressed());
@@ -44,13 +67,10 @@ pub(crate) async fn auth(client: &TaRpcClient, ta_pk: &G2Affine) -> anyhow::Resu
     let ssk = ta_pk * (x * GS_CONFIG.sk);
     let ssk_bytes = ssk.to_compressed();
 
-    let resp = client.get_uav_list(context::current(), gid.clone()).await?;
-    if resp.is_none() {
-        anyhow::bail!("Failed to get UAV list from TA");
-    }
-    let resp = resp.unwrap();
-
-    let data = decrypt_aes128_gcm(ssk_bytes[0..16].try_into().expect("Shared secret key length mismatch"), &resp)
+    let data = decrypt_aes128_gcm(
+        ssk_bytes[0..16].try_into().expect("Shared secret key length mismatch"),
+        &resp.ciphertext,
+    )
         .map_err(|e| anyhow::anyhow!("AES-GCM decryption failed: {}", e))?;
 
     let data = serde_json::from_slice::<Vec<GsAuthResponseStruct>>(&data)?;

@@ -44,7 +44,6 @@ const T_MAX: usize = 10;
 lazy_static! {
     static ref TA_CONFIG: TAConfig = init_ta_keys();
     static ref GS_LIST: DashMap<String, GsInfo> = DashMap::new();
-    static ref GS_SSK_LIST: DashMap<String, String> = DashMap::new();
     static ref UAV_LIST: UavList = UavList(DashMap::new());
 }
 

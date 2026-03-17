@@ -5,7 +5,6 @@ pub trait TaRpc {
     async fn get_ta_pubkey() -> String;
     async fn register_gs(req: GsRegisterRequest) -> ();
     async fn authenticate_gs(req: GsAuthRequest) -> Option<GsAuthResponse>;
-    async fn get_uav_list(gid: String) -> Option<Vec<u8>>;
     async fn register_uav_phase1(req: UavRegisterRequest1) -> Option<UavRegisterResponse1>;
     async fn register_uav_phase2(req: UavRegisterRequest2) -> Option<UavRegisterResponse2>;
 }
@@ -44,7 +43,11 @@ pub struct GsAuthRequest {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub struct GsAuthResponse {}
+pub struct GsAuthResponse {
+    pub sigma_t: String,
+    pub t_a: String,
+    pub ciphertext: Vec<u8>,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct GsAuthResponseStruct {

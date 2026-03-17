@@ -1,4 +1,4 @@
-use crate::{GsInfo, TAConfig, UavInfo, GS_LIST, GS_SSK_LIST, PUF_INPUT_SIZE, TAG, T_MAX, UAV_LIST};
+use crate::{GsInfo, TAConfig, UavInfo, GS_LIST, PUF_INPUT_SIZE, TAG, T_MAX, UAV_LIST};
 use blake2::{Blake2b512, Digest};
 use blstrs_plus::{
     elliptic_curve::hash2curve::ExpandMsgXmd, group::prime::PrimeCurveAffine, pairing, G1Affine, G1Projective, G2Affine, Scalar,
@@ -71,26 +71,24 @@ impl TaRpc for TA {
 
         info!("GS authentication successful for gid: {}", abbreviate_key_default(&gid));
 
+        let t_a = chrono::Utc::now().timestamp();
+        let t_a_hex = t_a.to_be_bytes().encode_hex::<String>();
+        let mut h_a_buf = Vec::with_capacity(gid.len() + t_g.len() + t_a_hex.len());
+        h_a_buf.extend_from_slice(gid.as_bytes());
+        h_a_buf.extend_from_slice(t_g.as_bytes());
+        h_a_buf.extend_from_slice(t_a_hex.as_bytes());
+        let h_a = G1Projective::hash::<ExpandMsgXmd<Blake2b512>>(&h_a_buf, TAG);
+        let sigma_t = (h_a * self.cfg.sk).to_compressed().encode_hex::<String>();
+
         let mut hasher = Blake2b512::new();
         hasher.update(tau.to_compressed());
         let x = hasher.finalize();
         let x = Scalar::from_bytes_wide(unsafe { &std::mem::transmute::<_, [u8; 64]>(x) });
 
         let ssk = gs_info.pk * x * self.cfg.sk;
-        let ssk_hex = ssk.to_compressed().encode_hex::<String>();
-
+        let ssk_bytes = ssk.to_compressed();
+        let ssk_hex = ssk_bytes.encode_hex::<String>();
         debug!("Generated shared secret key for GS: {}", abbreviate_key_default(&ssk_hex));
-
-        // insert ssk into GS_SSK_LIST
-        GS_SSK_LIST.insert(gid.clone(), ssk_hex);
-
-        Some(GsAuthResponse {})
-    }
-
-    async fn get_uav_list(self, _context: tarpc::context::Context, gid: String) -> Option<Vec<u8>> {
-        let ssk_hex_ref = GS_SSK_LIST.get(&gid)?;
-        let ssk_hex = ssk_hex_ref.value();
-        let ssk_bytes = hex::decode(ssk_hex).expect("Failed to decode shared secret key from hex");
 
         let data = UAV_LIST
             .0
@@ -104,7 +102,11 @@ impl TaRpc for TA {
             data_json.as_bytes(),
         )
         .expect("AES-GCM encryption failed");
-        Some(ciphertext)
+        Some(GsAuthResponse {
+            sigma_t,
+            t_a: t_a_hex,
+            ciphertext,
+        })
     }
 
     async fn register_uav_phase1(
