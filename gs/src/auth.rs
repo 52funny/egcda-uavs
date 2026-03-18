@@ -11,7 +11,7 @@ use tracing::{debug, info};
 use utils::{abbreviate_key_default, decrypt_aes128_gcm};
 
 #[allow(clippy::missing_transmute_annotations)]
-pub(crate) async fn auth(client: &TaRpcClient, ta_pk: &G2Affine) -> anyhow::Result<()> {
+pub(crate) async fn auth(client: &TaRpcClient, ta_pk1: &G1Affine, ta_pk2: &G2Affine) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
     let (gid, _sk) = (GS_CONFIG.gid.clone(), GS_CONFIG.sk);
     // second since epoch
@@ -54,7 +54,7 @@ pub(crate) async fn auth(client: &TaRpcClient, ta_pk: &G2Affine) -> anyhow::Resu
     let h_a = G1Projective::hash::<ExpandMsgXmd<Blake2b512>>(&h_a_buf, TAG);
     let sigma_t = G1Affine::from_compressed_hex(&resp.sigma_t).expect("Invalid TA signature");
     let lhs = pairing(&sigma_t, &G2Affine::generator());
-    let rhs = pairing(&G1Affine::from(h_a), ta_pk);
+    let rhs = pairing(&G1Affine::from(h_a), ta_pk2);
     if lhs != rhs {
         anyhow::bail!("Trust authority signature verification failed");
     }
@@ -64,7 +64,7 @@ pub(crate) async fn auth(client: &TaRpcClient, ta_pk: &G2Affine) -> anyhow::Resu
     let x = hasher.finalize();
     let x = Scalar::from_bytes_wide(unsafe { &std::mem::transmute::<_, [u8; 64]>(x) });
 
-    let ssk = ta_pk * (x * GS_CONFIG.sk);
+    let ssk = ta_pk1 * (x * GS_CONFIG.sk);
     let ssk_bytes = ssk.to_compressed();
 
     let data = decrypt_aes128_gcm(

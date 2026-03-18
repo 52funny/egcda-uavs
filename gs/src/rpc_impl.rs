@@ -1,16 +1,27 @@
 use crate::{GSConfig, UavInfo, TAG, T_MAX, UAV_LIST};
-use blake2::Blake2b512;
+use ::pairing::MillerLoopResult as _;
 use blstrs_plus::{
     elliptic_curve::hash2curve::ExpandMsgXmd,
     group::{prime::PrimeCurveAffine, Group},
-    pairing, G1Affine, G1Projective, G2Affine, Gt,
+    multi_miller_loop, pairing, G1Affine, G1Projective, G2Affine, G2Prepared, Scalar,
 };
+use dashmap::DashMap;
 use hex::ToHex;
+use lazy_static::lazy_static;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use rpc::*;
 use rug::integer::Order;
 use tracing::info;
-use utils::{abbreviate_key_default, build_crt};
+use utils::{abbreviate_key_default, build_crt, hash_to_scalar};
+
+#[derive(Debug, Clone)]
+struct AuthSession {
+    challenge: String,
+}
+
+lazy_static! {
+    static ref AUTH_SESSIONS: DashMap<String, AuthSession> = DashMap::new();
+}
 
 #[derive(Debug, Clone)]
 pub struct GS {
@@ -32,40 +43,75 @@ impl GsRpc for GS {
     async fn authenticate_uav_phase1(self, _context: ::tarpc::context::Context, req: UavAuthRequest1) -> Option<UavAuthResponse1> {
         let uid = req.uid;
         let uav_info = UAV_LIST.0.get(&uid)?;
+        let t_g = chrono::Utc::now().timestamp();
+        let x = rand::random::<[u64; 4]>();
+        let x = Scalar::from_raw_unchecked(x);
+        let x_point = G1Affine::generator() * x;
+        let z_point = G1Affine::from_compressed_hex(&uav_info.z).expect("Failed to decode UAV z value");
+
+        let mut buf = Vec::with_capacity(
+            uav_info.c.len()
+                + uid.len()
+                + 8
+                + self.cfg.pk_g1.to_compressed().len()
+                + x_point.to_compressed().len()
+                + z_point.to_compressed().len(),
+        );
+        buf.extend_from_slice(uav_info.c.as_bytes());
+        buf.extend_from_slice(uid.as_bytes());
+        buf.extend_from_slice(&t_g.to_be_bytes());
+        buf.extend_from_slice(&self.cfg.pk_g1.to_compressed());
+        buf.extend_from_slice(&x_point.to_compressed());
+        buf.extend_from_slice(&z_point.to_compressed());
+        let e = hash_to_scalar(&buf);
+        let sigma_g = x + e * self.cfg.sk;
+
+        AUTH_SESSIONS.insert(
+            uid.clone(),
+            AuthSession {
+                challenge: uav_info.c.clone(),
+            },
+        );
+
         Some(UavAuthResponse1 {
             puf_challenge: uav_info.c.clone(),
+            x: x_point.to_compressed().encode_hex::<String>(),
+            sigma_g: sigma_g.to_be_bytes().encode_hex::<String>(),
+            gs_pubkey: self.cfg.pk_g1.to_compressed().encode_hex::<String>(),
+            t_g,
         })
     }
 
     async fn authenticate_uav_phase2(self, _context: ::tarpc::context::Context, req: UavAuthRequest2) -> Option<UavAuthResponse2> {
         let uid = req.uid;
+        let (_, session) = AUTH_SESSIONS.remove(&uid)?;
         let uav_info = UAV_LIST.0.get(&uid)?;
 
         let pk_u = uav_info.pk;
         let z = G1Affine::from_compressed_hex(&uav_info.z).expect("Failed to decode UAV z value");
-        let x = G1Affine::from_compressed_hex(&req.x).expect("Failed to decode x value");
+        let g_r = G1Affine::from_compressed_hex(&req.g_r).expect("Failed to decode g_r value");
 
         let t_now = chrono::Utc::now().timestamp();
         if (t_now - req.t_u).abs() > T_MAX {
             tracing::warn!("UAV authentication request too old: {}", t_now - req.t_u);
             return None;
         }
-        let mut buf = Vec::with_capacity(uav_info.c.len() + req.x.len() + uid.len() + 8);
-        buf.extend_from_slice(uav_info.c.as_bytes());
-        buf.extend_from_slice(req.x.as_bytes());
+        let mut buf = Vec::with_capacity(session.challenge.len() + g_r.to_compressed().len() + uid.len() + 8);
+        buf.extend_from_slice(session.challenge.as_bytes());
+        buf.extend_from_slice(&g_r.to_compressed());
         buf.extend_from_slice(uid.as_bytes());
         buf.extend_from_slice(&req.t_u.to_be_bytes());
 
         let sigma = req.sigma;
         let sig = G1Affine::from_compressed_hex(&sigma).expect("Failed to decode UAV signature");
 
-        let h_i = G1Projective::hash::<ExpandMsgXmd<Blake2b512>>(&buf, TAG);
+        let h_i = G1Projective::hash::<ExpandMsgXmd<blake2::Blake2b512>>(&buf, TAG);
 
         let tmp: G1Affine = (sig + G1Projective::from(z)).into();
         let lhs = pairing(&tmp, &G2Affine::generator());
 
         let rhs1 = pairing(&h_i.into(), &pk_u);
-        let rhs2 = pairing(&x, &self.pk_t);
+        let rhs2 = pairing(&g_r, &self.pk_t);
 
         let rhs = rhs1 * rhs2;
         if lhs == rhs {
@@ -124,12 +170,50 @@ impl GsRpc for GS {
 
     async fn batch_authenticate_uavs_phase1(self, _context: tarpc::context::Context, reqs: Vec<String>) -> Option<Vec<String>> {
         let uids = reqs;
-        uids.par_iter()
+        let responses = uids
+            .iter()
             .map(|uid| {
                 let uav_info = UAV_LIST.0.get(uid)?;
-                Some(uav_info.c.clone())
+                let t_g = chrono::Utc::now().timestamp();
+                let x = rand::random::<[u64; 4]>();
+                let x = Scalar::from_raw_unchecked(x);
+                let x_point = G1Affine::generator() * x;
+                let z_point = G1Affine::from_compressed_hex(&uav_info.z).expect("Failed to decode UAV z value");
+                let mut buf = Vec::with_capacity(
+                    uav_info.c.len()
+                        + uid.len()
+                        + 8
+                        + self.cfg.pk_g1.to_compressed().len()
+                        + x_point.to_compressed().len()
+                        + z_point.to_compressed().len(),
+                );
+                buf.extend_from_slice(uav_info.c.as_bytes());
+                buf.extend_from_slice(uid.as_bytes());
+                buf.extend_from_slice(&t_g.to_be_bytes());
+                buf.extend_from_slice(&self.cfg.pk_g1.to_compressed());
+                buf.extend_from_slice(&x_point.to_compressed());
+                buf.extend_from_slice(&z_point.to_compressed());
+                let e = hash_to_scalar(&buf);
+                let sigma_g = x + e * self.cfg.sk;
+
+                AUTH_SESSIONS.insert(
+                    uid.clone(),
+                    AuthSession {
+                        challenge: uav_info.c.clone(),
+                    },
+                );
+
+                let response = UavAuthResponse1 {
+                    puf_challenge: uav_info.c.clone(),
+                    x: x_point.to_compressed().encode_hex::<String>(),
+                    sigma_g: sigma_g.to_be_bytes().encode_hex::<String>(),
+                    gs_pubkey: self.cfg.pk_g1.to_compressed().encode_hex::<String>(),
+                    t_g,
+                };
+                Some(serde_json::to_string(&response).expect("Failed to encode auth response"))
             })
-            .collect::<Option<Vec<_>>>()
+            .collect::<Option<Vec<_>>>()?;
+        Some(responses)
     }
     async fn batch_authenticate_uavs_phase2(
         self,
@@ -138,22 +222,24 @@ impl GsRpc for GS {
     ) -> Option<UavAuthResponse2> {
         let uav_infos = reqs
             .par_iter()
-            .map(|req| -> Option<UavInfo> {
+            .map(|req| -> Option<(UavInfo, AuthSession)> {
                 let uid = &req.uid;
-                Some(UAV_LIST.0.get(uid)?.clone())
+                let uav_info = UAV_LIST.0.get(uid)?.clone();
+                let (_, session) = AUTH_SESSIONS.remove(uid)?;
+                Some((uav_info, session))
             })
             .collect::<Option<Vec<_>>>()?;
 
-        let pk_us = uav_infos.par_iter().map(|uav_info| uav_info.pk).collect::<Vec<_>>();
+        let pk_us = uav_infos.par_iter().map(|(uav_info, _)| uav_info.pk).collect::<Vec<_>>();
         let z = uav_infos
             .par_iter()
-            .map(|uav_info| G1Affine::from_compressed_hex(&uav_info.z).expect("Failed to decode UAV z value"))
+            .map(|(uav_info, _)| G1Affine::from_compressed_hex(&uav_info.z).expect("Failed to decode UAV z value"))
             .map(G1Projective::from)
             .reduce(G1Projective::identity, |acc, z| acc + z);
 
-        let xs = reqs
+        let g_rs = reqs
             .par_iter()
-            .map(|req| G1Affine::from_compressed_hex(&req.x).expect("Failed to decode x value"))
+            .map(|req| G1Affine::from_compressed_hex(&req.g_r).expect("Failed to decode g_r value"))
             .collect::<Vec<_>>();
 
         let t_now = chrono::Utc::now().timestamp();
@@ -177,14 +263,15 @@ impl GsRpc for GS {
         let h_is = reqs
             .par_iter()
             .zip(uav_infos.par_iter())
-            .map(|(req, uav_info)| {
+            .map(|(req, (_uav_info, session))| {
                 let uid = &req.uid;
-                let mut buf = Vec::with_capacity(uav_info.c.len() + req.x.len() + uid.len() + 8);
-                buf.extend_from_slice(uav_info.c.as_bytes());
-                buf.extend_from_slice(req.x.as_bytes());
+                let g_r = G1Affine::from_compressed_hex(&req.g_r).expect("Failed to decode g_r value");
+                let mut buf = Vec::with_capacity(session.challenge.len() + g_r.to_compressed().len() + uid.len() + 8);
+                buf.extend_from_slice(session.challenge.as_bytes());
+                buf.extend_from_slice(&g_r.to_compressed());
                 buf.extend_from_slice(uid.as_bytes());
                 buf.extend_from_slice(&req.t_u.to_be_bytes());
-                G1Projective::hash::<ExpandMsgXmd<Blake2b512>>(&buf, TAG)
+                G1Projective::hash::<ExpandMsgXmd<blake2::Blake2b512>>(&buf, TAG)
             })
             .map(G1Affine::from)
             .collect::<Vec<_>>();
@@ -192,12 +279,12 @@ impl GsRpc for GS {
         let tmp: G1Affine = (sigma + z).into();
         let lhs = pairing(&tmp, &G2Affine::generator());
 
-        let rhs = h_is
-            .par_iter()
-            .zip(pk_us.par_iter())
-            .zip(xs.par_iter())
-            .map(|((h_i, pk_u), x)| pairing(h_i, pk_u) * pairing(x, &self.pk_t))
-            .reduce(Gt::identity, |acc, rhs| acc * rhs);
+        let pk_t_prepared = G2Prepared::from(self.pk_t);
+        let pk_us_prepared = pk_us.par_iter().map(|pk_u| G2Prepared::from(*pk_u)).collect::<Vec<_>>();
+        let g_r_terms = g_rs.iter().map(|g_r| (g_r, &pk_t_prepared));
+        let h_i_terms = h_is.iter().zip(pk_us_prepared.iter());
+        let terms = h_i_terms.chain(g_r_terms).collect::<Vec<_>>();
+        let rhs = multi_miller_loop(&terms).final_exponentiation();
 
         if lhs == rhs {
             info!("UAV batch authentication successful");

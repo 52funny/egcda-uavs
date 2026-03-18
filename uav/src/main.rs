@@ -9,6 +9,7 @@ use crate::{
     auth::{auth, batch_auth},
     comm::comm_with_uavs,
 };
+use blstrs_plus::G1Affine;
 use clap::Parser;
 use lazy_static::lazy_static;
 use puf::Puf;
@@ -54,7 +55,7 @@ lazy_static! {
     static ref UAV_AUTH_LIST: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(vec![]);
 }
 static UAV_CONFIG: OnceCell<UavConfig> = OnceCell::const_new();
-
+static TA_PUBKEY1: OnceCell<G1Affine> = OnceCell::const_new();
 static PUF: OnceCell<Puf> = OnceCell::const_new();
 
 #[tokio::main]
@@ -105,6 +106,14 @@ async fn main() -> anyhow::Result<()> {
     // read uav config from file
     let f = std::fs::File::open("uav.json").expect("not found uav.json, please register.");
     let uavs = serde_json::from_reader::<_, Vec<UavConfig>>(f)?;
+
+    let mut ta_transport = tarpc::serde_transport::tcp::connect(&ta_addr, Json::default);
+    ta_transport.config_mut().max_frame_length(usize::MAX);
+    let ta_client = TaRpcClient::new(client::Config::default(), ta_transport.await?).spawn();
+    info!("Connected to TA at {}", &ta_addr);
+    let ta_pk1 = ta_client.get_ta_pubkey1(context::current()).await?;
+    let ta_pk1 = G1Affine::from_compressed_hex(&ta_pk1).expect("Invalid trust authority public key");
+    TA_PUBKEY1.set(ta_pk1).expect("TA_PUBKEY1 already set");
 
     let mut transport = tarpc::serde_transport::tcp::connect(&gs_addr, Json::default);
     transport.config_mut().max_frame_length(usize::MAX);

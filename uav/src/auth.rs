@@ -1,12 +1,16 @@
-use crate::{uav_cfg::UavConfig, PUF, TAG, UAV_CONFIG};
+use crate::{uav_cfg::UavConfig, PUF, TAG, TA_PUBKEY1, UAV_CONFIG};
 use blake2::Blake2b512;
-use blstrs_plus::{elliptic_curve::hash2curve::ExpandMsgXmd, group::prime::PrimeCurveAffine, G1Affine, G1Projective, Scalar};
+use blstrs_plus::{
+    elliptic_curve::hash2curve::ExpandMsgXmd,
+    group::{prime::PrimeCurveAffine, Group},
+    G1Affine, G1Projective, Scalar,
+};
 use hex::ToHex;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use rpc::*;
 use tarpc::context;
 use tracing::{info, warn};
-use utils::abbreviate_key_default;
+use utils::{abbreviate_key_default, hash_to_scalar};
 
 pub(crate) async fn auth(client: &GsRpcClient) -> anyhow::Result<()> {
     let uav = UAV_CONFIG.get().cloned().expect("UAV not found");
@@ -23,18 +27,44 @@ pub(crate) async fn auth(client: &GsRpcClient) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
 
     let challenge = resp1.puf_challenge;
+    if (chrono::Utc::now().timestamp() - resp1.t_g).abs() > 10 {
+        anyhow::bail!("Ground station authentication request is too old");
+    }
+
     let puf_response = PUF.get().unwrap().calculate(&challenge).await?;
     let r = hex::decode(&puf_response)?;
     let mut r_buf = [0u8; 64];
     r_buf[..r.len()].copy_from_slice(&r);
     let r_scalar = Scalar::from_bytes_wide(&r_buf);
 
-    let x = G1Affine::generator() * r_scalar;
+    let g_r = G1Affine::generator() * r_scalar;
+    let x = G1Affine::from_compressed_hex(&resp1.x).expect("Invalid GS nonce point");
+    let gs_pk = G1Affine::from_compressed_hex(&resp1.gs_pubkey).expect("Invalid GS public key");
+    let z = G1Affine::from(*TA_PUBKEY1.get().expect("TA public key not found") * r_scalar);
+
+    let mut e_buf = Vec::with_capacity(
+        challenge.len() + uid.len() + 8 + gs_pk.to_compressed().len() + x.to_compressed().len() + z.to_compressed().len(),
+    );
+    e_buf.extend_from_slice(challenge.as_bytes());
+    e_buf.extend_from_slice(uid.as_bytes());
+    e_buf.extend_from_slice(&resp1.t_g.to_be_bytes());
+    e_buf.extend_from_slice(&gs_pk.to_compressed());
+    e_buf.extend_from_slice(&x.to_compressed());
+    e_buf.extend_from_slice(&z.to_compressed());
+    let e = hash_to_scalar(&e_buf);
+
+    let sigma_g = Scalar::from_be_hex(&resp1.sigma_g).expect("Invalid GS signature");
+    let lhs = G1Projective::generator() * sigma_g;
+    let rhs = G1Projective::from(x) + (G1Projective::from(gs_pk) * e);
+    if lhs != rhs {
+        anyhow::bail!("Ground station signature verification failed");
+    }
+
     let t_u = chrono::Utc::now().timestamp();
 
-    let mut buf = Vec::with_capacity(challenge.len() + 48 + uid.len() + 8);
+    let mut buf = Vec::with_capacity(challenge.len() + g_r.to_compressed().len() + uid.len() + 8);
     buf.extend_from_slice(challenge.as_bytes());
-    buf.extend_from_slice(x.to_compressed().encode_hex::<String>().as_bytes());
+    buf.extend_from_slice(&g_r.to_compressed());
     buf.extend_from_slice(uid.as_bytes());
     buf.extend_from_slice(&t_u.to_be_bytes());
 
@@ -44,7 +74,7 @@ pub(crate) async fn auth(client: &GsRpcClient) -> anyhow::Result<()> {
     let req2 = UavAuthRequest2 {
         uid: uid.clone(),
         sigma: sigma.to_compressed().encode_hex::<String>(),
-        x: x.to_compressed().encode_hex::<String>(),
+        g_r: g_r.to_compressed().encode_hex::<String>(),
         t_u,
     };
     let resp2 = client.authenticate_uav_phase2(ctx, req2).await?;
@@ -61,39 +91,81 @@ pub(crate) async fn auth(client: &GsRpcClient) -> anyhow::Result<()> {
 pub(crate) async fn batch_auth(client: &GsRpcClient, uavs: Vec<UavConfig>) -> anyhow::Result<()> {
     let ctx = context::current();
     let uids = uavs.par_iter().map(|uav| uav.uid.clone()).collect::<Vec<_>>();
-    let cs = client
+    let responses = client
         .batch_authenticate_uavs_phase1(ctx, uids)
         .await?
         .ok_or(anyhow::anyhow!("No response from GS in phase 1"))?;
 
-    let rs = futures::future::join_all(cs.iter().map(|c| PUF.get().unwrap().calculate(c)))
+    let phase1 = responses
+        .iter()
+        .map(|resp| serde_json::from_str::<UavAuthResponse1>(resp).map_err(anyhow::Error::from))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let rs = futures::future::join_all(phase1.iter().map(|resp| PUF.get().unwrap().calculate(&resp.puf_challenge)))
         .await
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?;
 
-    let xs = rs
+    let r_scalars = rs
         .par_iter()
         .map(|r| {
             let r = hex::decode(r).map_err(anyhow::Error::from)?;
             let mut r_buf = [0u8; 64];
             r_buf[..r.len()].copy_from_slice(&r);
-            let r_scalar = Scalar::from_bytes_wide(&r_buf);
-            let x = G1Affine::generator() * r_scalar;
-            Ok::<_, anyhow::Error>(x)
+            Ok::<_, anyhow::Error>(Scalar::from_bytes_wide(&r_buf))
         })
-        .map(|x| x.map(G1Affine::from))
         .collect::<Result<Vec<_>, _>>()?;
+
+    let g_rs = r_scalars
+        .par_iter()
+        .map(|r_scalar| G1Affine::from(G1Affine::generator() * r_scalar))
+        .collect::<Vec<_>>();
+
+    phase1
+        .par_iter()
+        .zip(r_scalars.par_iter())
+        .zip(uavs.par_iter())
+        .try_for_each(|((resp, r_scalar), uav)| -> anyhow::Result<()> {
+            if (chrono::Utc::now().timestamp() - resp.t_g).abs() > 10 {
+                anyhow::bail!("Ground station authentication request is too old");
+            }
+            let x = G1Affine::from_compressed_hex(&resp.x).expect("Invalid GS nonce point");
+            let gs_pk = G1Affine::from_compressed_hex(&resp.gs_pubkey).expect("Invalid GS public key");
+            let z = G1Affine::from(*TA_PUBKEY1.get().expect("TA public key not found") * *r_scalar);
+            let mut e_buf = Vec::with_capacity(
+                resp.puf_challenge.len()
+                    + uav.uid.len()
+                    + 8
+                    + gs_pk.to_compressed().len()
+                    + x.to_compressed().len()
+                    + z.to_compressed().len(),
+            );
+            e_buf.extend_from_slice(resp.puf_challenge.as_bytes());
+            e_buf.extend_from_slice(uav.uid.as_bytes());
+            e_buf.extend_from_slice(&resp.t_g.to_be_bytes());
+            e_buf.extend_from_slice(&gs_pk.to_compressed());
+            e_buf.extend_from_slice(&x.to_compressed());
+            e_buf.extend_from_slice(&z.to_compressed());
+            let e = hash_to_scalar(&e_buf);
+            let sigma_g = Scalar::from_be_hex(&resp.sigma_g).expect("Invalid GS signature");
+            let lhs = G1Projective::generator() * sigma_g;
+            let rhs = G1Projective::from(x) + (G1Projective::from(gs_pk) * e);
+            if lhs != rhs {
+                anyhow::bail!("Ground station signature verification failed");
+            }
+            Ok(())
+        })?;
 
     let t_u = chrono::Utc::now().timestamp();
 
-    let sigmas = cs
+    let sigmas = phase1
         .par_iter()
-        .zip(xs.par_iter())
+        .zip(g_rs.par_iter())
         .zip(uavs.par_iter())
-        .map(|((c, x), uav)| {
-            let mut buf = Vec::with_capacity(c.len() + 48 + uav.uid.len() + 8);
-            buf.extend_from_slice(c.as_bytes());
-            buf.extend_from_slice(x.to_compressed().encode_hex::<String>().as_bytes());
+        .map(|((resp, g_r), uav)| {
+            let mut buf = Vec::with_capacity(resp.puf_challenge.len() + g_r.to_compressed().len() + uav.uid.len() + 8);
+            buf.extend_from_slice(resp.puf_challenge.as_bytes());
+            buf.extend_from_slice(&g_r.to_compressed());
             buf.extend_from_slice(uav.uid.as_bytes());
             buf.extend_from_slice(&t_u.to_be_bytes());
             let h_i = G1Projective::hash::<ExpandMsgXmd<Blake2b512>>(&buf, TAG);
@@ -104,13 +176,13 @@ pub(crate) async fn batch_auth(client: &GsRpcClient, uavs: Vec<UavConfig>) -> an
 
     let reqs = sigmas
         .par_iter()
-        .zip(xs.par_iter())
+        .zip(g_rs.par_iter())
         .zip(uavs.par_iter())
-        .map(|((sigma, x), uav)| UavAuthRequest2 {
+        .map(|((sigma, g_r), uav)| UavAuthRequest2 {
             uid: uav.uid.clone(),
             sigma: sigma.to_compressed().encode_hex::<String>(),
-            x: x.to_compressed().encode_hex::<String>(),
-            t_u: chrono::Utc::now().timestamp(),
+            g_r: g_r.to_compressed().encode_hex::<String>(),
+            t_u,
         })
         .collect::<Vec<_>>();
 

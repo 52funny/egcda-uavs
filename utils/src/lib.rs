@@ -1,4 +1,5 @@
 use blake2::{Blake2b512, Digest};
+use blstrs_plus::Scalar;
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::prelude::*;
@@ -84,6 +85,15 @@ pub fn build_crt(p: Vec<Integer>) -> Integer {
         .zip(mi_inv)
         .map(|(m_i, m_i_inv)| m_i.clone() * m_i_inv)
         .sum::<Integer>()
+}
+
+#[allow(clippy::missing_transmute_annotations)]
+pub fn hash_to_scalar(data: &[u8]) -> Scalar {
+    let mut hasher = Blake2b512::new();
+    hasher.update(data);
+    let digest = hasher.finalize();
+    let wide = unsafe { std::mem::transmute::<_, [u8; 64]>(digest) };
+    Scalar::from_bytes_wide(&wide)
 }
 
 /// Abbreviate a string like: aa9f0...34865

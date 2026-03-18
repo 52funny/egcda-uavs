@@ -7,12 +7,14 @@ use utils::abbreviate_key_default;
 use crate::GS_CONFIG;
 
 pub(crate) async fn register(client: &TaRpcClient) -> anyhow::Result<()> {
-    let (gid, pk) = (GS_CONFIG.gid.clone(), GS_CONFIG.pk);
-    let pk = pk.to_compressed().encode_hex::<String>();
+    let gid = GS_CONFIG.gid.clone();
+    let pk1 = GS_CONFIG.pk_g1.to_compressed().encode_hex::<String>();
+    let pk2 = GS_CONFIG.pk.to_compressed().encode_hex::<String>();
 
     let req = rpc::GsRegisterRequest {
         gid: gid.clone(),
-        gs_pubkey: pk,
+        gs_pubkey1: pk1,
+        gs_pubkey2: pk2,
     };
 
     client.register_gs(context::current(), req).await?;

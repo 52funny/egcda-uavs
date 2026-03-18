@@ -30,6 +30,7 @@ dashmap = { version = "5.5.3", features = ["serde"] }
 serde_json = "1.0.143"
 futures-channel = "0.3.31"
 blstrs_plus = "0.8.18"
+pairing = "0.23.0"
 tarpc = { version = "0.36.0", features = ["full"] }
 blake2 = "0.10.6"
 rayon = "1.11.0"

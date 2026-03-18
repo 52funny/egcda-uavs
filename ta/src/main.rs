@@ -1,5 +1,5 @@
 mod rpc_impl;
-use blstrs_plus::{group::prime::PrimeCurveAffine, G2Affine, Scalar};
+use blstrs_plus::{group::prime::PrimeCurveAffine, G1Affine, G2Affine, Scalar};
 use dashmap::DashMap;
 use futures::{future, StreamExt};
 use hex::ToHex;
@@ -16,12 +16,14 @@ use utils::abbreviate_key_default;
 #[derive(Clone)]
 pub struct TAConfig {
     pub sk: Scalar,
-    pub pk: G2Affine,
+    pub pk1: G1Affine,
+    pub pk2: G2Affine,
 }
 
 pub struct GsInfo {
     pub gid: String,
-    pub pk: G2Affine,
+    pub pk1: G1Affine,
+    pub pk2: G2Affine,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
@@ -51,8 +53,13 @@ lazy_static! {
 fn init_ta_keys() -> TAConfig {
     let sk_bytes = rand::thread_rng().gen::<[u64; 4]>();
     let sk = Scalar::from_raw_unchecked(sk_bytes);
-    let pk = G2Affine::generator() * sk;
-    TAConfig { sk, pk: pk.into() }
+    let pk1 = G1Affine::generator() * sk;
+    let pk2 = G2Affine::generator() * sk;
+    TAConfig {
+        sk,
+        pk1: pk1.into(),
+        pk2: pk2.into(),
+    }
 }
 
 #[tokio::main]
@@ -63,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let sk_hex = TA_CONFIG.sk.to_be_bytes().encode_hex::<String>();
-    let pk_hex = TA_CONFIG.pk.to_compressed().encode_hex::<String>();
+    let pk_hex = TA_CONFIG.pk2.to_compressed().encode_hex::<String>();
     tracing::info!("sk_ta: {}", abbreviate_key_default(&sk_hex));
     tracing::info!("pk_ta: {}", abbreviate_key_default(&pk_hex));
 

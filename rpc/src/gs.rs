@@ -17,13 +17,17 @@ pub struct UavAuthRequest1 {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct UavAuthResponse1 {
     pub puf_challenge: String,
+    pub x: String,
+    pub sigma_g: String,
+    pub gs_pubkey: String,
+    pub t_g: i64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct UavAuthRequest2 {
     pub uid: String,
     pub sigma: String,
-    pub x: String,
+    pub g_r: String,
     pub t_u: i64,
 }
 

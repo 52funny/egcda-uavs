@@ -9,6 +9,7 @@ use tokio::{
 
 /// Puf client that reuses a single TCP connection and exchanges fixed-size (24-byte) messages.
 pub struct Puf {
+    io_lock: Arc<Mutex<()>>,
     writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
     reader: Arc<Mutex<BufReader<tokio::net::tcp::OwnedReadHalf>>>,
 }
@@ -20,6 +21,7 @@ impl Puf {
         let (read_half, write_half) = stream.into_split();
         let reader = BufReader::new(read_half);
         Ok(Self {
+            io_lock: Arc::new(Mutex::new(())),
             writer: Arc::new(Mutex::new(write_half)),
             reader: Arc::new(Mutex::new(reader)),
         })
@@ -31,6 +33,10 @@ impl Puf {
         if payload.len() != 24 {
             bail!("challenge must be exactly 24 bytes, got {}", payload.len());
         }
+
+        // Serialize the full request/response cycle so responses cannot be
+        // consumed by a different concurrent caller.
+        let _io_guard = self.io_lock.lock().await;
 
         // Send the 24-byte challenge.
         {

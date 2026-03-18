@@ -2,7 +2,8 @@ use rug::Integer;
 
 #[tarpc::service]
 pub trait TaRpc {
-    async fn get_ta_pubkey() -> String;
+    async fn get_ta_pubkey1() -> String;
+    async fn get_ta_pubkey2() -> String;
     async fn register_gs(req: GsRegisterRequest) -> ();
     async fn authenticate_gs(req: GsAuthRequest) -> Option<GsAuthResponse>;
     async fn register_uav_phase1(req: UavRegisterRequest1) -> Option<UavRegisterResponse1>;
@@ -12,7 +13,8 @@ pub trait TaRpc {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct GsRegisterRequest {
     pub gid: String,
-    pub gs_pubkey: String,
+    pub gs_pubkey1: String,
+    pub gs_pubkey2: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

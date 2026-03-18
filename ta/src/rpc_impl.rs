@@ -27,17 +27,27 @@ impl TA {
 }
 
 impl TaRpc for TA {
-    async fn get_ta_pubkey(self, _context: tarpc::context::Context) -> String {
-        hex::encode(self.cfg.pk.to_compressed())
+    async fn get_ta_pubkey1(self, _context: tarpc::context::Context) -> String {
+        hex::encode(self.cfg.pk1.to_compressed())
+    }
+
+    async fn get_ta_pubkey2(self, _context: tarpc::context::Context) -> String {
+        hex::encode(self.cfg.pk2.to_compressed())
     }
 
     async fn register_gs(self, _context: tarpc::context::Context, req: rpc::GsRegisterRequest) -> () {
-        let (gid, pk_str) = (req.gid, req.gs_pubkey);
-        let pk_bytes = hex::decode(pk_str).expect("Failed to decode hex");
-        let pk_array: [u8; 96] = pk_bytes.try_into().expect("Public key bytes length mismatch");
-        let pk = G2Affine::from_compressed(&pk_array).expect("Failed to create G2Affine from bytes");
+        let gid = req.gid;
+
+        let pk1_bytes = hex::decode(req.gs_pubkey1).expect("Failed to decode GS G1 public key");
+        let pk1_array: [u8; 48] = pk1_bytes.try_into().expect("GS G1 public key bytes length mismatch");
+        let pk1 = G1Affine::from_compressed(&pk1_array).expect("Failed to create G1Affine from bytes");
+
+        let pk2_bytes = hex::decode(req.gs_pubkey2).expect("Failed to decode GS G2 public key");
+        let pk2_array: [u8; 96] = pk2_bytes.try_into().expect("GS G2 public key bytes length mismatch");
+        let pk2 = G2Affine::from_compressed(&pk2_array).expect("Failed to create G2Affine from bytes");
+
         info!("GS registered: {}", abbreviate_key_default(&gid));
-        GS_LIST.insert(gid.clone(), GsInfo { gid, pk });
+        GS_LIST.insert(gid.clone(), GsInfo { gid, pk2, pk1 });
     }
 
     #[allow(clippy::missing_transmute_annotations)]
@@ -62,7 +72,7 @@ impl TaRpc for TA {
         let tau = G1Projective::hash::<ExpandMsgXmd<Blake2b512>>(&buf, TAG);
 
         let lhs = pairing(&sig, &G2Affine::generator());
-        let rhs = pairing(&tau.into(), &gs_info.pk);
+        let rhs = pairing(&tau.into(), &gs_info.pk2);
 
         if lhs != rhs {
             warn!("GS authentication failed for gid : {}", gid);
@@ -85,7 +95,7 @@ impl TaRpc for TA {
         let x = hasher.finalize();
         let x = Scalar::from_bytes_wide(unsafe { &std::mem::transmute::<_, [u8; 64]>(x) });
 
-        let ssk = gs_info.pk * x * self.cfg.sk;
+        let ssk = gs_info.pk1 * x * self.cfg.sk;
         let ssk_bytes = ssk.to_compressed();
         let ssk_hex = ssk_bytes.encode_hex::<String>();
         debug!("Generated shared secret key for GS: {}", abbreviate_key_default(&ssk_hex));
