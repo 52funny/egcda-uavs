@@ -1,4 +1,4 @@
-use crate::{uav_cfg::UavConfig, PUF, TAG, TA_PUBKEY1, UAV_CONFIG};
+use crate::{uav_cfg::UavConfig, PUF, TAG, TA_PUBKEY1, UAV_CONFIG, UAV_SESSION_KEYS};
 use blake2::Blake2b512;
 use blstrs_plus::{
     elliptic_curve::hash2curve::ExpandMsgXmd,
@@ -10,7 +10,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use rpc::*;
 use tarpc::context;
 use tracing::{info, warn};
-use utils::{abbreviate_key_default, hash_to_scalar};
+use utils::{abbreviate_key_default, derive_session_key_from_g1, hash_to_scalar};
 
 pub(crate) async fn auth(client: &GsRpcClient) -> anyhow::Result<()> {
     let uav = UAV_CONFIG.get().cloned().expect("UAV not found");
@@ -69,6 +69,9 @@ pub(crate) async fn auth(client: &GsRpcClient) -> anyhow::Result<()> {
     buf.extend_from_slice(&t_u.to_be_bytes());
 
     let h_i = G1Projective::hash::<ExpandMsgXmd<Blake2b512>>(&buf, TAG);
+    let shared = G1Affine::from(G1Projective::from(x) * r_scalar);
+    let ssk_g_u = derive_session_key_from_g1(&shared);
+    UAV_SESSION_KEYS.insert(uid.clone(), hex::encode(ssk_g_u));
     let sigma = h_i * uav.sk;
 
     let req2 = UavAuthRequest2 {
@@ -169,16 +172,26 @@ pub(crate) async fn batch_auth(client: &GsRpcClient, uavs: Vec<UavConfig>) -> an
             buf.extend_from_slice(uav.uid.as_bytes());
             buf.extend_from_slice(&t_u.to_be_bytes());
             let h_i = G1Projective::hash::<ExpandMsgXmd<Blake2b512>>(&buf, TAG);
-            h_i * uav.sk
+            (G1Affine::from(h_i), G1Affine::from(h_i * uav.sk))
         })
-        .map(G1Affine::from)
         .collect::<Vec<_>>();
+
+    phase1
+        .par_iter()
+        .zip(r_scalars.par_iter())
+        .zip(uavs.par_iter())
+        .for_each(|((resp, r_scalar), uav)| {
+            let x = G1Affine::from_compressed_hex(&resp.x).expect("Invalid GS nonce point");
+            let shared = G1Affine::from(G1Projective::from(x) * *r_scalar);
+            let ssk_g_u = derive_session_key_from_g1(&shared);
+            UAV_SESSION_KEYS.insert(uav.uid.clone(), hex::encode(ssk_g_u));
+        });
 
     let reqs = sigmas
         .par_iter()
         .zip(g_rs.par_iter())
         .zip(uavs.par_iter())
-        .map(|((sigma, g_r), uav)| UavAuthRequest2 {
+        .map(|(((_h_i, sigma), g_r), uav)| UavAuthRequest2 {
             uid: uav.uid.clone(),
             sigma: sigma.to_compressed().encode_hex::<String>(),
             g_r: g_r.to_compressed().encode_hex::<String>(),

@@ -11,6 +11,7 @@ use crate::{
 };
 use blstrs_plus::G1Affine;
 use clap::Parser;
+use dashmap::DashMap;
 use lazy_static::lazy_static;
 use puf::Puf;
 use register::register;
@@ -35,6 +36,9 @@ struct CliArgs {
     #[arg(short, long, help = "Batch authentication", default_value = "1")]
     pub batch_auth: Option<usize>,
 
+    #[arg(long, help = "PUF TCP connection pool size", default_value = "8")]
+    pub puf_pool_size: usize,
+
     #[arg(short, long, default_value = "127.0.0.1")]
     pub ta_ip: String,
 
@@ -53,6 +57,7 @@ const TAG: &[u8] = b"BLS_SIG_BLS12381G1_XMD:BLAKE2b-512_SSWU_RO_NUL_";
 lazy_static! {
     // static ref PUF: Puf = Puf::new(([127, 0, 0, 1], 12345));
     static ref UAV_AUTH_LIST: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(vec![]);
+    static ref UAV_SESSION_KEYS: DashMap<String, String> = DashMap::new();
 }
 static UAV_CONFIG: OnceCell<UavConfig> = OnceCell::const_new();
 static TA_PUBKEY1: OnceCell<G1Affine> = OnceCell::const_new();
@@ -65,12 +70,15 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("uav=info".parse().unwrap()))
         .init();
     let args = CliArgs::parse();
+    let puf_pool_size = args.puf_pool_size;
 
     let ta_addr = format!("{}:{}", args.ta_ip, args.ta_port);
     let gs_addr = format!("{}:{}", args.gs_ip, args.gs_port);
 
     PUF.get_or_init(|| async {
-        let puf = Puf::new(([127, 0, 0, 1], 12345)).await.expect("Failed to initialize PUF");
+        let puf = Puf::new_with_pool_size(([127, 0, 0, 1], 12345), puf_pool_size)
+            .await
+            .expect("Failed to initialize PUF");
         puf
     })
     .await;
@@ -121,16 +129,19 @@ async fn main() -> anyhow::Result<()> {
     let client = GsRpcClient::new(client::Config::default(), transport.await?).spawn();
     info!("Connected to GS at {}", &gs_addr);
 
-    if let Some(num) = args.batch_auth {
-        let uavs = uavs.into_iter().take(num).collect::<Vec<_>>();
-        if uavs.len() != num {
-            return Err(anyhow::anyhow!("Not enough UAVs for batch authentication"));
+    match args.batch_auth {
+        Some(num) if num > 1 => {
+            let uavs = uavs.into_iter().take(num).collect::<Vec<_>>();
+            if uavs.len() != num {
+                return Err(anyhow::anyhow!("Not enough UAVs for batch authentication"));
+            }
+            info!("Batch authentication with {} UAVs", uavs.len());
+            let t = std::time::Instant::now();
+            batch_auth(&client, uavs).await?;
+            info!("Batch authentication time elapsed: {:?}", t.elapsed());
+            return Ok(());
         }
-        info!("Batch authentication with {} UAVs", uavs.len());
-        let t = std::time::Instant::now();
-        batch_auth(&client, uavs).await?;
-        info!("Batch authentication time elapsed: {:?}", t.elapsed());
-        return Ok(());
+        _ => {}
     }
 
     let uav = uavs.first().ok_or(anyhow::anyhow!("No UAV config found in uav.json"))?.clone();

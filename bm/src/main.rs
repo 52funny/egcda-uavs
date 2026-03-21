@@ -10,7 +10,7 @@ const TAG: &[u8] = b"BLS_SIG_BLS12381G1_XMD:BLAKE2b-512_SSWU_RO_NUL_";
 
 #[tokio::main]
 async fn main() {
-    let puf = Puf::new(([127, 0, 0, 1], 12345)).await.unwrap();
+    let puf = Puf::new_with_pool_size(([127, 0, 0, 1], 12345), 8).await.unwrap();
     test_scalar_mul_point1();
     test_scalar_mul_point2();
     test_add_g1();

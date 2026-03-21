@@ -1,4 +1,4 @@
-use crate::{GSConfig, UavInfo, TAG, T_MAX, UAV_LIST};
+use crate::{GSConfig, UavInfo, TAG, T_MAX, UAV_LIST, UAV_SESSION_KEYS};
 use ::pairing::MillerLoopResult as _;
 use blstrs_plus::{
     elliptic_curve::hash2curve::ExpandMsgXmd,
@@ -12,11 +12,12 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 use rpc::*;
 use rug::integer::Order;
 use tracing::info;
-use utils::{abbreviate_key_default, build_crt, hash_to_scalar};
+use utils::{abbreviate_key_default, build_crt, derive_session_key_from_g1, hash_to_scalar};
 
 #[derive(Debug, Clone)]
 struct AuthSession {
     challenge: String,
+    x: Scalar,
 }
 
 lazy_static! {
@@ -70,6 +71,7 @@ impl GsRpc for GS {
             uid.clone(),
             AuthSession {
                 challenge: uav_info.c.clone(),
+                x,
             },
         );
 
@@ -115,6 +117,9 @@ impl GsRpc for GS {
 
         let rhs = rhs1 * rhs2;
         if lhs == rhs {
+            let shared = G1Affine::from(G1Projective::from(g_r) * session.x);
+            let ssk_g_u = derive_session_key_from_g1(&shared);
+            UAV_SESSION_KEYS.insert(uid.clone(), hex::encode(ssk_g_u));
             info!("UAV authenticate successful {}", abbreviate_key_default(&uid));
         } else {
             tracing::warn!("UAV authenticate failed for uid: {}", abbreviate_key_default(&uid));
@@ -200,6 +205,7 @@ impl GsRpc for GS {
                     uid.clone(),
                     AuthSession {
                         challenge: uav_info.c.clone(),
+                        x,
                     },
                 );
 
@@ -287,6 +293,11 @@ impl GsRpc for GS {
         let rhs = multi_miller_loop(&terms).final_exponentiation();
 
         if lhs == rhs {
+            reqs.par_iter().zip(g_rs.par_iter()).zip(uav_infos.par_iter()).for_each(|((req, g_r), (_, session))| {
+                let shared = G1Affine::from(G1Projective::from(*g_r) * session.x);
+                let ssk_g_u = derive_session_key_from_g1(&shared);
+                UAV_SESSION_KEYS.insert(req.uid.clone(), hex::encode(ssk_g_u));
+            });
             info!("UAV batch authentication successful");
             return Some(UavAuthResponse2 {});
         }

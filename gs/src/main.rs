@@ -46,6 +46,7 @@ const T_MAX: i64 = 10;
 lazy_static::lazy_static! {
     pub static ref GS_CONFIG: GSConfig = init_gs_keys();
     pub static ref UAV_LIST: UavList = UavList(DashMap::new());
+    pub static ref UAV_SESSION_KEYS: DashMap<String, String> = DashMap::new();
     pub static ref UAV_FAKE_PRIME: Mutex<Vec<Integer>> = Mutex::new(vec![]);
 }
 

@@ -1,4 +1,5 @@
 use blake2::{Blake2b512, Digest};
+use blstrs_plus::G1Affine;
 use blstrs_plus::Scalar;
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -94,6 +95,15 @@ pub fn hash_to_scalar(data: &[u8]) -> Scalar {
     let digest = hasher.finalize();
     let wide = unsafe { std::mem::transmute::<_, [u8; 64]>(digest) };
     Scalar::from_bytes_wide(&wide)
+}
+
+pub fn derive_session_key_from_g1(point: &G1Affine) -> [u8; 16] {
+    let mut hasher = Blake2b512::new();
+    hasher.update(point.to_compressed());
+    let digest = hasher.finalize();
+    let mut key = [0u8; 16];
+    key.copy_from_slice(&digest[..16]);
+    key
 }
 
 /// Abbreviate a string like: aa9f0...34865
