@@ -1,5 +1,6 @@
 mod auth;
 mod comm;
+mod mem;
 mod puf;
 // this module is for serial communication with PUF
 // mod puf_serial;
@@ -21,6 +22,9 @@ use tokio::sync::OnceCell;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use uav_cfg::UavConfig;
+
+#[global_allocator]
+static GLOBAL: mem::TrackingAllocator = mem::TrackingAllocator;
 
 #[derive(Debug, Parser)]
 struct CliArgs {
@@ -69,6 +73,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("uav=info".parse().unwrap()))
         .init();
+    mem::reset_phase_peak();
+    mem::log_checkpoint("startup");
     let args = CliArgs::parse();
     let puf_pool_size = args.puf_pool_size;
 
@@ -82,8 +88,10 @@ async fn main() -> anyhow::Result<()> {
         puf
     })
     .await;
+    mem::log_checkpoint("puf_ready");
 
     if args.register || !std::fs::exists("uav.json")? {
+        let register_start = mem::reset_phase_peak();
         let mut transport = tarpc::serde_transport::tcp::connect(&ta_addr, Json::default);
         transport.config_mut().max_frame_length(usize::MAX);
         let client = TaRpcClient::new(client::Config::default(), transport.await?).spawn();
@@ -108,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
 
         UAV_CONFIG.set(uav_cfg.clone()).ok();
         tracing::debug!("uav: {:?}", UAV_CONFIG.get());
+        mem::log_phase("register", register_start);
         return Ok(());
     }
 
@@ -136,9 +145,11 @@ async fn main() -> anyhow::Result<()> {
                 return Err(anyhow::anyhow!("Not enough UAVs for batch authentication"));
             }
             info!("Batch authentication with {} UAVs", uavs.len());
+            let auth_start = mem::reset_phase_peak();
             let t = std::time::Instant::now();
             batch_auth(&client, uavs).await?;
             info!("Batch authentication time elapsed: {:?}", t.elapsed());
+            mem::log_phase("batch_auth", auth_start);
             return Ok(());
         }
         _ => {}
@@ -147,18 +158,22 @@ async fn main() -> anyhow::Result<()> {
     let uav = uavs.first().ok_or(anyhow::anyhow!("No UAV config found in uav.json"))?.clone();
     UAV_CONFIG.set(uav).expect("UAV_CONFIG already set");
 
+    let auth_start = mem::reset_phase_peak();
     let t = std::time::Instant::now();
     for _ in 0..args.all_auth_num {
         // auth if self
         auth(&client).await?;
+        mem::log_checkpoint("auth_iteration");
     }
     info!("Auth {} time elapsed: {:?}", args.all_auth_num, t.elapsed());
+    mem::log_phase("auth", auth_start);
 
     // parallel optimization
     // let t = std::time::Instant::now();
     // futures::future::join_all((0..args.all_auth_num).map(|_| call_auth(&client))).await;
     // info!("Auth {} time elapsed: {:?}", args.all_auth_num, t.elapsed());
 
+    let comm_start = mem::reset_phase_peak();
     let ids = client
         .get_all_uav_id(context::current(), UAV_CONFIG.get().unwrap().uid.clone())
         .await?;
@@ -169,6 +184,7 @@ async fn main() -> anyhow::Result<()> {
     comm_with_uavs(&client).await?;
     info!("Communicate group size: {}", ids.len());
     info!("Communicate group key time elapsed: {:?}", t.elapsed());
+    mem::log_phase("group_comm", comm_start);
     Ok(())
 }
 
