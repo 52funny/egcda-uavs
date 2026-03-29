@@ -1,4 +1,4 @@
-use crate::{UavInfo, GS_CONFIG, TAG, UAV_LIST};
+use crate::{mem, UavInfo, GS_CONFIG, TAG, UAV_LIST};
 use blake2::{Blake2b512, Digest};
 use blstrs_plus::{
     elliptic_curve::hash2curve::ExpandMsgXmd, group::prime::PrimeCurveAffine, pairing, G1Affine, G1Projective, G2Affine, Scalar,
@@ -89,5 +89,6 @@ pub(crate) async fn auth(client: &TaRpcClient, ta_pk1: &G1Affine, ta_pk2: &G2Aff
     }
 
     info!("Received UAV list size: {}", UAV_LIST.0.len());
+    mem::log_uav_storage_stats("uav_list_updated");
     Ok(())
 }

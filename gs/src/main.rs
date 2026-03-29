@@ -1,4 +1,5 @@
 mod auth;
+mod mem;
 mod reg;
 mod rpc_impl;
 use crate::rpc_impl::GS;
@@ -19,6 +20,9 @@ use tarpc::{
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use utils::abbreviate_key_default;
+
+#[global_allocator]
+static GLOBAL: mem::TrackingAllocator = mem::TrackingAllocator;
 
 #[derive(Debug, Clone)]
 pub struct GSConfig {
@@ -75,6 +79,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or("gs=info".parse().unwrap()))
         .init();
+    mem::reset_phase_peak();
+    mem::log_checkpoint("startup");
 
     let ta_addr = "0.0.0.0:8090";
     let bind_addr = "0.0.0.0:8091";
@@ -93,10 +99,15 @@ async fn main() -> anyhow::Result<()> {
     info!("TA's G2 public key: {}", abbreviate_key_default(&hex::encode(pk_t2.to_compressed())));
 
     // register self to TA
+    let register_start = mem::reset_phase_peak();
     register(&client).await?;
+    mem::log_phase("register_gs", register_start);
 
     // auth self to TA
+    let auth_start = mem::reset_phase_peak();
     auth(&client, &pk_t1, &pk_t2).await?;
+    mem::log_phase("auth_gs", auth_start);
+    mem::log_uav_storage_stats("uav_list_loaded");
 
     // spawn the server
     tokio::spawn(server(bind_addr, pk_t2));
@@ -111,6 +122,7 @@ async fn server(bind_addr: &str, pk_t: G2Affine) -> anyhow::Result<()> {
     let mut listener = tarpc::serde_transport::tcp::listen(&bind_addr, Json::default).await?;
     listener.config_mut().max_frame_length(usize::MAX);
     tracing::info!("Listening on port {}", listener.local_addr().port());
+    mem::log_checkpoint("server_ready");
 
     let cfg = GSConfig {
         gid: GS_CONFIG.gid.clone(),
