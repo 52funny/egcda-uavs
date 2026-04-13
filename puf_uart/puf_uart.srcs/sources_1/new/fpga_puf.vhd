@@ -203,6 +203,10 @@ end fpga_puf_cell;
 architecture fpga_puf_cell_rtl of fpga_puf_cell is
 
   signal osc : std_ulogic;
+  
+  -- Prevent optimizer from removing this oscillator logic
+  attribute KEEP : string;
+  attribute KEEP of osc : signal is "TRUE";
 
 begin
 

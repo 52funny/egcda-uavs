@@ -69,7 +69,7 @@ uart_tx#(
     .tx_pin         (uart_tx)
 );
 
-reg trig_i;
+reg trig_i = 1'b0;
 wire busy_o;
 wire[95:0] id_o;
 
@@ -105,11 +105,13 @@ begin
 	if(!rst_n)
 	begin
 		puf_state <= PUF_IDLE;
+		trig_i <= 1'b0;
 	end
 	else
 		case(puf_state)
 			PUF_IDLE:
 			begin
+				trig_i <= 1'b0;
 				if(puf_enable)
 					puf_state <= PUF_SIG;
 				else
@@ -117,13 +119,16 @@ begin
 				tx_enable <= 1'b0;
 			end
 			PUF_SIG:
+			begin
+				trig_i <= 1'b1;
 				if(busy_o)
 				begin
 					puf_state <= PUF_WAIT;
 					trig_i <= 1'b0;
 				end
 				else
-					trig_i <= 1'b1;
+					puf_state <= PUF_SIG;
+			end
 			PUF_WAIT:
 				if(~busy_o)
 				begin
@@ -151,25 +156,27 @@ begin
 		puf_enable <= 1'b0;
 	end
 	else
+	begin
+		if(rx_data_valid && rx_data_ready)
+		begin
+			if (rx_cnt < 4'd11)
 			begin
-				if(rx_data_valid && rx_data_ready)
-				begin
-					if (rx_cnt < 4'd11)
-					begin
-						challenge <= (challenge << 8) | rx_data;
-						rx_cnt <= rx_cnt + 1'b1;
-					end
-					else
-					begin
-						challenge <= (challenge << 8) | rx_data;
-						rx_cnt <= 4'd0;
-						// enable puf working
-						puf_enable <= 1'b1;
-					end
-				end
-				else if (puf_state == PUF_IDLE) 
-					puf_enable <= 1'b0;
+				challenge <= (challenge << 8) | rx_data;
+				rx_cnt <= rx_cnt + 1'b1;
+				puf_enable <= 1'b0;
 			end
+			else
+			begin
+				// 12th byte received (rx_cnt == 11)
+				challenge <= (challenge << 8) | rx_data;
+				rx_cnt <= 4'd0;
+				// enable puf working
+				puf_enable <= 1'b1;
+			end
+		end
+		else if (puf_state == PUF_IDLE) 
+			puf_enable <= 1'b0;
+	end
 end
 
 // tx state
@@ -192,33 +199,31 @@ begin
 					// response <= id_o;
 					response <= id_o ^ challenge;
 					tx_state <= TX_SEND;
+					tx_data_valid <= 1'b0;
 				end
 				else
 					tx_state <= TX_IDLE;
 			end
 			TX_SEND:
 			begin
-				if(tx_data_valid && tx_data_ready)
+				if(tx_data_ready)
 				begin
-					if (tx_cnt < 4'd12)
+					if (tx_cnt < 4'd11)
 					begin
 						tx_data <= response[95:88];
 						response <= (response << 8);
+						tx_data_valid <= 1'b1;
 						tx_cnt <= tx_cnt + 1'b1;
 					end
 					else
 					begin
+						// 12th byte sent (tx_cnt == 11)
+						tx_data <= response[95:88];
+						response <= (response << 8);
+						tx_data_valid <= 1'b1;
 						tx_cnt <= 4'd0;
 						tx_state <= TX_IDLE;
-						tx_data_valid <= 1'b0;
 					end
-				end
-				else if (~tx_data_valid)
-				begin
-					tx_data <= response[95:88];
-					response <= (response << 8);
-					tx_cnt <= tx_cnt + 1'b1;
-					tx_data_valid <= 1'b1;
 				end
 			end
 			default:
