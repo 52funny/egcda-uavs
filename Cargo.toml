@@ -7,3 +7,10 @@ members = [
     "uav",
     "bm"
 ]
+
+# This must be the very first line
+# cargo-features = ["codegen-backend"]
+#
+# [profile.dev]
+# codegen-backend = "cranelift"
+
